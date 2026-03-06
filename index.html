@@ -57,6 +57,15 @@ body{
   letter-spacing:-1.5px;line-height:1;color:var(--text);text-align:right;
 }
 #totalAmt .cur{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:0;vertical-align:2px;margin-right:1px}
+#exportBtn{
+  background:none;border:1px solid var(--bdr);
+  color:var(--muted);font-size:11px;font-weight:700;
+  border-radius:6px;padding:3px 7px;cursor:pointer;
+  letter-spacing:.5px;line-height:1;
+  opacity:.55;transition:opacity .15s;
+  align-self:center;
+}
+#exportBtn:active{opacity:1;background:rgba(220,170,170,0.12)}
 
 /* ── TABS ── */
 #tabs{
@@ -235,6 +244,7 @@ body{
       <button class="mb" id="btnNextM">›</button>
     </div>
   </div>
+  <button id="exportBtn" onclick="exportCSV()" title="匯出CSV">↓</button>
   <div id="totalAmt"><span class="cur">NT$</span><span id="tNum">0</span></div>
 </div>
 
@@ -479,6 +489,26 @@ function toast(msg){
   const el=document.getElementById('toast');
   el.textContent=msg;el.classList.add('show');
   setTimeout(()=>el.classList.remove('show'),2000);
+}
+
+function exportCSV(){
+  if(recs.length===0){toast('沒有資料可以匯出');return;}
+  const header='日期,分類,金額,備註';
+  const rows=recs.map(r=>{
+    const c=CATS[r.cat]||CATS.daily;
+    const note=(r.note||'').replace(/,/g,'，').replace(/\n/g,' ');
+    return `${r.date},${c.lbl},${r.amt},${note}`;
+  });
+  const csv='\uFEFF'+header+'\n'+rows.join('\n'); // BOM for Excel
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const now=new Date();
+  a.href=url;
+  a.download=`記帳_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(url);
+  toast('已匯出 CSV ↓');
 }
 
 init();
