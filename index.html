@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#f0d8d8">
+<meta name="mobile-web-app-capable" content="yes">
+<title>記帳</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --rose:   #e8b8b8;
+  --roseDk: #c99090;
+  --accent: #8c6f6f;
+  --text:   #4a3a3a;
+  --muted:  #a88888;
+  --card:   #fff;
+  --bg1:    #fdf6f6;
+  --bg2:    #f7e8e8;
+  --bdr:    rgba(220,170,170,0.25);
+  --shd:    rgba(220,170,170,0.18);
+  --danger: #e07070;
+  --kb-h:   256px;
+}
+*,*::before,*::after{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html{background:var(--bg1)}
+body{
+  font-family:"Noto Sans TC",sans-serif;
+  background:linear-gradient(170deg,var(--bg1) 0%,var(--bg2) 100%);
+  background-attachment:fixed;
+  color:var(--text);min-height:100vh;overflow-x:hidden;
+  -webkit-user-select:none;user-select:none;
+  padding-bottom:calc(var(--kb-h) + 8px);
+}
+
+/* ── TOP ── */
+#top{
+  padding:max(env(safe-area-inset-top,20px),20px) 18px 12px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.mnav{display:flex;align-items:center;gap:4px}
+.mb{
+  background:none;border:none;color:var(--rose);
+  font-size:24px;cursor:pointer;
+  width:32px;height:32px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+}
+.mb:active{background:rgba(220,170,170,0.18)}
+#mLabel{
+  font-family:"Montserrat",sans-serif;
+  font-size:14px;font-weight:700;letter-spacing:.4px;
+  color:var(--text);min-width:90px;text-align:center;
+}
+#totalAmt{
+  font-family:"Montserrat",sans-serif;
+  font-size:30px;font-weight:800;
+  letter-spacing:-1.5px;line-height:1;color:var(--text);text-align:right;
+}
+#totalAmt .cur{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:0;vertical-align:2px;margin-right:1px}
+
+/* ── TABS ── */
+#tabs{
+  display:flex;margin:0 14px 10px;
+  background:rgba(255,255,255,0.55);
+  border-radius:13px;border:1px solid var(--bdr);
+  overflow:hidden;padding:3px;gap:3px;
+}
+.tb{
+  flex:1;padding:7px 0;font-size:11px;font-weight:700;text-align:center;
+  cursor:pointer;color:var(--muted);background:none;border:none;
+  border-radius:10px;letter-spacing:.8px;
+}
+.tb.on{background:var(--rose);color:#fff;box-shadow:0 2px 8px var(--shd)}
+
+/* ── SCROLL ── */
+#scrollArea{padding:0 14px}
+
+/* ── LIST ── */
+.dg-head{
+  font-size:10px;font-weight:700;color:var(--muted);
+  letter-spacing:1.2px;padding:10px 4px 5px;
+  display:flex;justify-content:space-between;
+  cursor:pointer;user-select:none;-webkit-user-select:none;
+}
+.dg-head:active{opacity:.65}
+.dg-arrow{margin-right:4px;font-size:9px;color:var(--rose)}
+.ri{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 13px;background:var(--card);
+  border-radius:14px;margin-bottom:6px;
+  border:1px solid var(--bdr);
+  box-shadow:0 2px 10px var(--shd);
+  animation:fi .2s ease;
+}
+@keyframes fi{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.ri-ico{
+  width:34px;height:34px;border-radius:50%;
+  background:linear-gradient(135deg,#fdf0f0,#f5dede);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;flex-shrink:0;
+}
+.ri-info{flex:1;min-width:0}
+.ri-note{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ri-cat{font-size:10px;color:var(--muted);margin-top:1px}
+.ri-amt{font-family:"Montserrat",sans-serif;font-size:15px;font-weight:800;white-space:nowrap}
+.ri-amt small{font-size:10px;color:var(--muted);font-weight:500;margin-right:1px}
+.ri-del{
+  background:none;border:none;color:rgba(200,150,150,0.35);
+  font-size:13px;cursor:pointer;
+  width:26px;height:26px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.ri-del:active{color:var(--danger);background:rgba(224,112,112,0.1)}
+.empty{text-align:center;padding:36px 20px;color:var(--muted);font-size:13px;opacity:.65}
+.empty-ico{font-size:30px;margin-bottom:8px;opacity:.4}
+
+/* ── 分析 (純 HTML/CSS) ── */
+#anaPanel{display:none}
+.ana-total{
+  background:var(--card);border-radius:16px;
+  border:1px solid var(--bdr);box-shadow:0 2px 10px var(--shd);
+  padding:16px;margin-bottom:10px;text-align:center;
+}
+.ana-total-label{font-size:10px;color:var(--muted);letter-spacing:1.5px;margin-bottom:4px}
+.ana-total-num{
+  font-family:"Montserrat",sans-serif;
+  font-size:34px;font-weight:800;letter-spacing:-1px;color:var(--text);
+}
+.ana-total-num small{font-size:14px;color:var(--muted);font-weight:600;margin-right:2px}
+.ana-stack-wrap{
+  background:var(--card);border-radius:16px;
+  border:1px solid var(--bdr);box-shadow:0 2px 10px var(--shd);
+  padding:14px 16px;margin-bottom:10px;
+}
+.stack-bar{
+  height:20px;border-radius:10px;overflow:hidden;
+  display:flex;margin-bottom:10px;
+  background:rgba(220,170,170,0.1);
+}
+.stack-seg{height:100%}
+.cat-card{
+  background:var(--card);border-radius:14px;
+  border:1px solid var(--bdr);box-shadow:0 2px 10px var(--shd);
+  padding:12px 14px;margin-bottom:7px;
+}
+.cat-card-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cat-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.cat-name{flex:1;font-size:13px;font-weight:600;display:flex;align-items:center;gap:5px}
+.cat-pct{font-family:"Montserrat",sans-serif;font-size:11px;color:var(--muted);font-weight:700}
+.cat-amt{font-family:"Montserrat",sans-serif;font-size:15px;font-weight:800;color:var(--text);margin-left:8px}
+.cat-amt small{font-size:10px;color:var(--muted);font-weight:500;margin-right:1px}
+.bar-bg{height:6px;border-radius:3px;background:rgba(220,170,170,0.12)}
+.bar-fill{height:100%;border-radius:3px}
+.ana-empty{text-align:center;padding:30px;color:var(--muted);font-size:13px;opacity:.6}
+
+/* ── 浮動鍵盤 ── */
+#kb{
+  position:fixed;bottom:0;left:0;right:0;height:var(--kb-h);
+  background:rgba(254,250,250,0.98);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-top:1px solid var(--bdr);border-radius:22px 22px 0 0;
+  box-shadow:0 -4px 28px rgba(200,150,150,0.14);
+  padding:9px 12px max(env(safe-area-inset-bottom,0px),4px);
+  display:grid;grid-template-rows:auto auto 1fr;gap:6px;
+  z-index:100;
+}
+.kb-r1{display:flex;align-items:center;gap:8px;padding:0 2px}
+#amtDisp{
+  font-family:"Montserrat",sans-serif;font-size:30px;font-weight:800;
+  letter-spacing:-1.5px;flex:1;line-height:1;
+}
+#amtDisp .cur{font-size:12px;color:var(--muted);font-weight:600;margin-right:2px;vertical-align:2px}
+.ph{color:var(--rose)!important;opacity:.45}
+.kb-cur{
+  display:inline-block;width:2px;height:26px;background:var(--rose);
+  vertical-align:middle;margin-left:2px;animation:blink .9s infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+#dateInp{
+  border:none;background:transparent;font-family:"Noto Sans TC",sans-serif;
+  font-size:11px;color:var(--muted);cursor:pointer;text-align:right;
+  flex-shrink:0;padding:0;-webkit-user-select:auto;user-select:auto;
+}
+.kb-r2{display:flex}
+.note-inp{
+  flex:1;border:1.5px solid var(--bdr);border-radius:50px;
+  padding:6px 13px;background:transparent;
+  font-family:"Noto Sans TC",sans-serif;font-size:12px;color:var(--text);
+  outline:none;-webkit-user-select:auto;user-select:auto;
+}
+.note-inp::placeholder{color:var(--muted);opacity:.7}
+.note-inp:focus{border-color:var(--rose)}
+.kb-r3{display:grid;grid-template-columns:repeat(3,1fr) 46px;gap:4px}
+.nb{
+  border-radius:11px;border:1.5px solid var(--bdr);
+  background:rgba(230,180,180,0.07);
+  font-family:"Montserrat",sans-serif;font-size:19px;font-weight:700;
+  color:var(--text);cursor:pointer;min-height:40px;
+  display:flex;align-items:center;justify-content:center;
+}
+.nb.pressed{background:var(--rose);color:#fff;border-color:var(--rose)}
+.nb.del{font-size:15px;color:var(--muted)}
+.nb.del.pressed{background:rgba(200,150,150,0.15);color:var(--accent);border-color:transparent}
+.nb.ok{
+  background:linear-gradient(135deg,#ebb8b8,#d49898);
+  color:#fff;border-color:transparent;font-size:13px;font-weight:800;letter-spacing:.4px;
+  box-shadow:0 3px 12px rgba(220,160,160,0.35);
+}
+.nb.ok.pressed{background:var(--accent)}
+.cbt{
+  border-radius:11px;border:1.5px solid var(--bdr);
+  background:rgba(235,185,185,0.08);
+  font-size:19px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.cbt.on{background:var(--rose);border-color:var(--rose);box-shadow:0 2px 8px rgba(220,160,160,0.4)}
+.cbt.pressed{opacity:.65}
+#toast{
+  position:fixed;bottom:calc(var(--kb-h)+12px);left:50%;
+  transform:translateX(-50%) translateY(8px);
+  background:var(--accent);color:#fff;padding:8px 20px;border-radius:50px;
+  font-size:12px;font-weight:700;opacity:0;transition:opacity .2s,transform .2s;
+  pointer-events:none;white-space:nowrap;z-index:200;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<div id="top">
+  <div>
+    <div class="mnav">
+      <button class="mb" id="btnPrevM">‹</button>
+      <span id="mLabel"></span>
+      <button class="mb" id="btnNextM">›</button>
+    </div>
+  </div>
+  <div id="totalAmt"><span class="cur">NT$</span><span id="tNum">0</span></div>
+</div>
+
+<div id="tabs">
+  <button class="tb on" id="tabList">明細</button>
+  <button class="tb"    id="tabAna">分析</button>
+</div>
+
+<div id="scrollArea">
+  <div id="listPanel"></div>
+  <div id="anaPanel"></div>
+</div>
+
+<div id="kb">
+  <div class="kb-r1">
+    <div id="amtDisp">
+      <span class="cur">NT$</span><span id="aN" class="ph">0</span><span class="kb-cur" id="kc"></span>
+    </div>
+    <input type="date" id="dateInp">
+  </div>
+  <div class="kb-r2">
+    <input class="note-inp" id="noteInp" type="text" placeholder="備註（選填）" autocomplete="off">
+  </div>
+  <div class="kb-r3" id="kbGrid">
+    <button class="nb" data-n="7">7</button>
+    <button class="nb" data-n="8">8</button>
+    <button class="nb" data-n="9">9</button>
+    <button class="cbt on" data-c="food">🍴</button>
+
+    <button class="nb" data-n="4">4</button>
+    <button class="nb" data-n="5">5</button>
+    <button class="nb" data-n="6">6</button>
+    <button class="cbt" data-c="snack">🍫</button>
+
+    <button class="nb" data-n="1">1</button>
+    <button class="nb" data-n="2">2</button>
+    <button class="nb" data-n="3">3</button>
+    <button class="cbt" data-c="fun">✨</button>
+
+    <button class="nb del" data-del>⌫</button>
+    <button class="nb" data-n="0">0</button>
+    <button class="nb ok" data-ok>記帳</button>
+    <button class="cbt" data-c="daily">🧻</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const CATS={food:{icon:'🍴',lbl:'食物'},snack:{icon:'🍫',lbl:'零食'},fun:{icon:'✨',lbl:'娛樂'},daily:{icon:'🧻',lbl:'日用品'}};
+const CKEYS=Object.keys(CATS);
+const CAT_C=['#e8b8b8','#b8d4e8','#b8e8cc','#e8ddb8'];
+const SK='kakeibo_v2';
+
+let recs=[],inp='',cat='food',vy,vm,ctab='list';
+let collapsed={}; // 記錄哪些日期被折疊
+
+const save=()=>{try{localStorage.setItem(SK,JSON.stringify(recs))}catch(e){}};
+const load=()=>{try{const r=localStorage.getItem(SK);if(r)recs=JSON.parse(r)}catch(e){recs=[]}};
+const fmtD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function init(){
+  load();
+  const now=new Date();
+  vy=now.getFullYear();vm=now.getMonth();
+  document.getElementById('dateInp').value=fmtD(now);
+
+  // 月份按鈕
+  document.getElementById('btnPrevM').addEventListener('touchstart',e=>{e.preventDefault();chM(-1)},{passive:false});
+  document.getElementById('btnNextM').addEventListener('touchstart',e=>{e.preventDefault();chM(1)},{passive:false});
+  document.getElementById('btnPrevM').addEventListener('click',()=>chM(-1));
+  document.getElementById('btnNextM').addEventListener('click',()=>chM(1));
+
+  // tab 按鈕 — 直接 onclick，不用 touchstart（tab 沒有 300ms 問題，因為不在 scroll 容器裡）
+  document.getElementById('tabList').onclick=()=>goTab('list');
+  document.getElementById('tabAna').onclick=()=>goTab('ana');
+
+  // 鍵盤：touchstart event delegation，防止 300ms 延遲
+  const grid=document.getElementById('kbGrid');
+  grid.addEventListener('touchstart',e=>{
+    const btn=e.target.closest('[data-n],[data-del],[data-ok],[data-c]');
+    if(!btn)return;
+    e.preventDefault();
+    btn.classList.add('pressed');
+    setTimeout(()=>btn.classList.remove('pressed'),90);
+    if(btn.dataset.n!==undefined) ni(btn.dataset.n);
+    else if(btn.dataset.del!==undefined) nd();
+    else if(btn.dataset.ok!==undefined) addRec();
+    else if(btn.dataset.c!==undefined) sc(btn.dataset.c);
+  },{passive:false});
+  // 桌機 mousedown fallback
+  grid.addEventListener('mousedown',e=>{
+    const btn=e.target.closest('[data-n],[data-del],[data-ok],[data-c]');
+    if(!btn)return;
+    if(btn.dataset.n!==undefined) ni(btn.dataset.n);
+    else if(btn.dataset.del!==undefined) nd();
+    else if(btn.dataset.ok!==undefined) addRec();
+    else if(btn.dataset.c!==undefined) sc(btn.dataset.c);
+  });
+
+  render();
+}
+
+function ni(v){if(inp.length>=7)return;if(v==='0'&&inp==='')return;inp+=v;ud();}
+function nd(){inp=inp.slice(0,-1);ud();}
+function ud(){
+  const a=document.getElementById('aN'),c=document.getElementById('kc');
+  if(!inp){a.textContent='0';a.className='ph';c.style.display='inline-block';}
+  else    {a.textContent=inp;a.className='';c.style.display='none';}
+}
+
+function sc(id){
+  cat=id;
+  document.querySelectorAll('.cbt').forEach(b=>b.classList.toggle('on',b.dataset.c===id));
+}
+
+function addRec(){
+  const amt=parseInt(inp,10);
+  if(!amt||amt<=0){toast('請輸入金額');return;}
+  const dv=document.getElementById('dateInp').value;
+  if(!dv){toast('請選日期');return;}
+  const note=document.getElementById('noteInp').value.trim();
+  recs.unshift({id:Date.now(),date:dv,cat,amt,note});
+  save();inp='';ud();
+  document.getElementById('noteInp').value='';
+  const d=new Date(dv+'T00:00:00');vy=d.getFullYear();vm=d.getMonth();
+  render();
+  toast(CATS[cat].icon+' NT$'+amt.toLocaleString());
+}
+
+function delRec(id){recs=recs.filter(r=>r.id!==id);save();render();}
+function chM(d){vm+=d;if(vm>11){vm=0;vy++;}if(vm<0){vm=11;vy--;}collapsed={};render();}
+
+function goTab(t){
+  ctab=t;
+  document.getElementById('tabList').classList.toggle('on',t==='list');
+  document.getElementById('tabAna').classList.toggle('on',t==='ana');
+  // 直接操作 display，確保可見
+  document.getElementById('listPanel').style.cssText=t==='list'?'display:block':'display:none';
+  document.getElementById('anaPanel').style.cssText=t==='ana'?'display:block':'display:none';
+  render();
+}
+
+function toggleDate(date){
+  collapsed[date]=!collapsed[date];
+  // 只更新 DOM，不重繪全部
+  const items=document.getElementById('di-'+date);
+  const arrow=document.getElementById('da-'+date);
+  if(items) items.style.display=collapsed[date]?'none':'block';
+  if(arrow) arrow.textContent=collapsed[date]?'▸':'▾';
+}
+
+function getMrs(){
+  const p=vy+'-'+String(vm+1).padStart(2,'0');
+  return recs.filter(r=>r.date.startsWith(p));
+}
+
+function render(){
+  const mn=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  document.getElementById('mLabel').textContent=vy+'．'+mn[vm];
+  const mrs=getMrs();
+  const total=mrs.reduce((s,r)=>s+r.amt,0);
+  document.getElementById('tNum').textContent=total.toLocaleString();
+  if(ctab==='list') renderList(mrs);
+  else renderAna(mrs,total);
+}
+
+function renderList(mrs){
+  const lp=document.getElementById('listPanel');
+  if(mrs.length===0){lp.innerHTML='<div class="empty"><div class="empty-ico">🌸</div>這個月還沒有記帳</div>';return;}
+  const g={};mrs.forEach(r=>{(g[r.date]=g[r.date]||[]).push(r);});
+  const dates=Object.keys(g).sort((a,b)=>b.localeCompare(a));
+  lp.innerHTML=dates.map(date=>{
+    const d=new Date(date+'T00:00:00');
+    const dl=d.toLocaleDateString('zh-TW',{month:'numeric',day:'numeric',weekday:'short'});
+    const dt=g[date].reduce((s,r)=>s+r.amt,0);
+    const isCollapsed=!!collapsed[date];
+    const items=g[date].map(r=>{
+      const c=CATS[r.cat]||CATS.daily;
+      return `<div class="ri">
+        <div class="ri-ico">${c.icon}</div>
+        <div class="ri-info">
+          <div class="ri-note">${r.note?esc(r.note):c.lbl}</div>
+          <div class="ri-cat">${c.lbl}</div>
+        </div>
+        <div class="ri-amt"><small>$</small>${r.amt.toLocaleString()}</div>
+        <button class="ri-del" onclick="delRec(${r.id})">✕</button>
+      </div>`;
+    }).join('');
+    return `
+      <div class="dg-head" onclick="toggleDate('${date}')">
+        <span><span id="da-${date}" class="dg-arrow">${isCollapsed?'▸':'▾'}</span> ${dl}</span>
+        <span style="color:var(--roseDk);font-family:Montserrat,sans-serif;font-weight:700">$${dt.toLocaleString()}</span>
+      </div>
+      <div id="di-${date}" style="display:${isCollapsed?'none':'block'}">${items}</div>`;
+  }).join('');
+}
+
+function renderAna(mrs,total){
+  const ap=document.getElementById('anaPanel');
+  if(mrs.length===0){ap.innerHTML='<div class="ana-empty">這個月還沒有記帳 🌸</div>';return;}
+  const tv={};CKEYS.forEach(k=>tv[k]=0);
+  mrs.forEach(r=>{if(tv[r.cat]!==undefined)tv[r.cat]+=r.amt;});
+
+  const segs=CKEYS.map((k,i)=>{
+    const pct=total>0?(tv[k]/total*100):0;
+    return pct>0?`<div class="stack-seg" style="width:${pct.toFixed(1)}%;background:${CAT_C[i]}"></div>`:'';
+  }).join('');
+
+  const sorted=[...CKEYS].sort((a,b)=>tv[b]-tv[a]);
+  const cards=sorted.map(k=>{
+    const i=CKEYS.indexOf(k);
+    const c=CATS[k];const v=tv[k];
+    const pct=total>0?Math.round(v/total*100):0;
+    return `<div class="cat-card">
+      <div class="cat-card-top">
+        <div class="cat-dot" style="background:${CAT_C[i]}"></div>
+        <div class="cat-name">${c.icon} ${c.lbl}</div>
+        <div class="cat-pct">${pct}%</div>
+        <div class="cat-amt"><small>$</small>${v.toLocaleString()}</div>
+      </div>
+      <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${CAT_C[i]}"></div></div>
+    </div>`;
+  }).join('');
+
+  ap.innerHTML=`
+    <div class="ana-total">
+      <div class="ana-total-label">本月支出</div>
+      <div class="ana-total-num"><small>NT$</small>${total.toLocaleString()}</div>
+    </div>
+    <div class="ana-stack-wrap">
+      <div class="stack-bar">${segs}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:2px">
+        ${CKEYS.filter(k=>tv[k]>0).map(k=>{const i=CKEYS.indexOf(k);return `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${CAT_C[i]}"></span>${CATS[k].lbl}</span>`;}).join('')}
+      </div>
+    </div>
+    ${cards}`;
+}
+
+function toast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),2000);
+}
+
+init();
+</script>
+</body>
+</html>
