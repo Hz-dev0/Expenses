@@ -203,12 +203,16 @@
     .ri-amt   { font-family: "Montserrat", sans-serif; font-size: 15px; font-weight: 800; white-space: nowrap; cursor: pointer; }
     .ri-amt small { font-size: 10px; color: var(--muted); font-weight: 500; margin-right: 1px; }
     .ri-amt.exempt { color: var(--muted); }
-    .ri-amt.exempt::before {
-      content: '🚫';
-      font-size: 11px;
-      margin-right: 4px;
-      vertical-align: 0px;
-      opacity: .6;
+    .ri.exempt-row {
+      background: repeating-linear-gradient(
+        135deg,
+        rgba(220,170,170,0.07) 0px,
+        rgba(220,170,170,0.07) 8px,
+        transparent 8px,
+        transparent 16px
+      );
+      border-color: rgba(220,170,170,0.15);
+      opacity: .72;
     }
 
     .ri-del {
@@ -891,7 +895,7 @@
       tx.objectStore(IDB_STORE).put(val, key);
       tx.oncomplete = res;
       tx.onerror    = () => rej(tx.error);
-    })).catch(() => {});
+    })).catch(err => { console.error('[IDB] idbSet failed:', key, err); });
   }
 
   function idbGet(key) {
@@ -905,8 +909,14 @@
   /* ── 工具函式（雙寫：IDB 主要 + localStorage 備份）── */
   const save = () => {
     const v = JSON.stringify(recs);
-    idbSet(SK, v);
-    try { localStorage.setItem(SK, v); } catch(e) {}
+    let lsOk = false;
+    idbSet(SK, v).catch(() => {});
+    try { localStorage.setItem(SK, v); lsOk = true; } catch(e) {}
+    // 兩邊都寫不進去才警告（idbSet 失敗已在 idbSet 內 console.error）
+    if (!lsOk) {
+      console.error('[save] localStorage also failed — storage may be full');
+      toast('⚠️ 儲存失敗！請立即匯出備份');
+    }
   };
   const saveLbl = () => {
     const v = JSON.stringify(getCustomLabels());
@@ -918,31 +928,42 @@
     idbSet(SK_BDG, v);
     try { localStorage.setItem(SK_BDG, v); } catch(e) {}
   };
-  /* ── 讀取（優先 IDB，fallback localStorage）── */
+  /* ── 讀取（優先 IDB，fallback localStorage，雙向補齊）── */
   async function loadAll() {
     // recs
     try {
-      const v = await idbGet(SK);
-      if (v) { recs = JSON.parse(v); }
-      else {
-        const ls = localStorage.getItem(SK);
-        if (ls) { recs = JSON.parse(ls); idbSet(SK, ls); } // 遷移舊資料
+      const idbVal = await idbGet(SK);
+      const lsVal  = localStorage.getItem(SK);
+      if (idbVal) {
+        recs = JSON.parse(idbVal);
+        if (!lsVal) { try { localStorage.setItem(SK, idbVal); } catch(e) {} } // IDB 有、LS 沒有 → 補 LS
+      } else if (lsVal) {
+        recs = JSON.parse(lsVal);
+        idbSet(SK, lsVal); // LS 有、IDB 沒有 → 補 IDB（含遷移舊資料）
       }
     } catch(e) {
       try { const ls = localStorage.getItem(SK); if (ls) recs = JSON.parse(ls); } catch(e2) {}
     }
     // labels
     try {
-      const v = await idbGet(SK_LBL) || localStorage.getItem(SK_LBL);
+      const idbVal = await idbGet(SK_LBL);
+      const lsVal  = localStorage.getItem(SK_LBL);
+      const v = idbVal || lsVal;
       if (v) {
         const saved = JSON.parse(v);
         CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].lbl = saved[k]; });
+        if (idbVal && !lsVal) { try { localStorage.setItem(SK_LBL, idbVal); } catch(e) {} }
+        if (!idbVal && lsVal) { idbSet(SK_LBL, lsVal); }
       }
     } catch(e) {}
     // budget
     try {
-      const v = await idbGet(SK_BDG) || localStorage.getItem(SK_BDG);
+      const idbVal = await idbGet(SK_BDG);
+      const lsVal  = localStorage.getItem(SK_BDG);
+      const v = idbVal ?? lsVal;
       if (v !== null && v !== undefined) budget = parseInt(v, 10) || 0;
+      if (idbVal && !lsVal) { try { localStorage.setItem(SK_BDG, idbVal); } catch(e) {} }
+      if (!idbVal && lsVal) { idbSet(SK_BDG, lsVal); }
     } catch(e) {}
   }
 
@@ -1132,6 +1153,14 @@
     rebuildCats();
     // 從現有資料的最大 id 繼續，避免重複
     if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
+
+    // 資料重置偵測：若上次有記帳但這次 recs 是空的，警告可能被系統清除
+    const SK_LAST = 'kakeibo_last_open';
+    const lastHadData = localStorage.getItem(SK_LAST) === '1';
+    if (lastHadData && recs.length === 0) {
+      setTimeout(() => toast('⚠️ 偵測到資料可能被清除，請確認或匯入備份'), 500);
+    }
+    try { localStorage.setItem(SK_LAST, recs.length > 0 ? '1' : '0'); } catch(e) {}
 
     // 請求持久化儲存 + 空間偵測
     if (navigator.storage) {
@@ -1432,7 +1461,7 @@
 
       const items = g[date].map(r => {
         const c = CATS[r.cat] || CATS.daily;
-        return `<div class="ri">
+        return `<div class="ri${r.exempt ? ' exempt-row' : ''}">
           <div class="ri-ico">${c.icon}</div>
           <div class="ri-info">
             <div class="ri-note">${r.note ? esc(r.note) : c.lbl}</div>
@@ -1634,6 +1663,15 @@
 
     top.addEventListener('touchcancel', () => { blocked = false; moved = false; }, { passive: true });
   }
+
+  // PWA 生命週期：切換 App 或回桌面時強制寫入，防止 iOS 背景砍掉導致資料遺失
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      save();
+      saveLbl();
+      saveBdg();
+    }
+  });
 
   init();
 </script>
