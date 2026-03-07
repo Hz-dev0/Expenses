@@ -123,23 +123,6 @@
     }
     #budgetHint.over { color: var(--danger); opacity: .85; }
 
-    #exportBtn {
-      background: none;
-      border: 1px solid var(--bdr);
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-      border-radius: 6px;
-      padding: 3px 7px;
-      cursor: pointer;
-      letter-spacing: .5px;
-      line-height: 1;
-      opacity: .55;
-      transition: opacity .15s;
-      align-self: center;
-    }
-    #exportBtn:active { opacity: 1; background: rgba(220,170,170,0.12); }
-
     /* ── TABS ── */
     #tabs {
       display: flex;
@@ -168,7 +151,7 @@
     .tb.on { background: var(--rose); color: #fff; box-shadow: 0 2px 8px var(--shd); }
 
     /* ── SCROLL ── */
-    #scrollArea { padding: 0 14px; }
+    #scrollArea { padding: 0; }
 
     /* ── LIST ── */
     .dg-head {
@@ -327,15 +310,20 @@
       z-index: 100;
     }
 
-    .kb-r1 { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+    .kb-r1 {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      padding: 0 2px;
+    }
 
     #amtDisp {
       font-family: "Montserrat", sans-serif;
       font-size: 30px;
       font-weight: 800;
       letter-spacing: -1.5px;
-      flex: 1;
       line-height: 1;
+      grid-column: 1;
     }
     #amtDisp .cur { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 2px; vertical-align: 2px; }
 
@@ -351,19 +339,6 @@
     }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
-    #dateLbl {
-      font-family: "Noto Sans TC", sans-serif;
-      font-size: 11px;
-      color: var(--muted);
-      cursor: pointer;
-      text-align: right;
-      flex-shrink: 0;
-      white-space: nowrap;
-      padding: 2px 0;
-      border-bottom: 1px dashed rgba(168,136,136,0.4);
-    }
-    #dateLbl:active { opacity: .6; }
-
     #saveBtn {
       background: none;
       border: none;
@@ -371,14 +346,25 @@
       cursor: pointer;
       padding: 0 4px;
       opacity: .55;
-      flex-shrink: 0;
       transition: opacity .15s;
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
+      grid-column: 2;
+      justify-self: center;
     }
     #saveBtn:active { opacity: 1; }
-    .kb-r1 { position: relative; }
+
+    #dateLbl {
+      font-family: "Noto Sans TC", sans-serif;
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      text-align: right;
+      white-space: nowrap;
+      padding: 2px 0;
+      border-bottom: 1px dashed rgba(168,136,136,0.4);
+      grid-column: 3;
+      justify-self: end;
+    }
+    #dateLbl:active { opacity: .6; }
 
     /* ── Panel wrap for swipe ── */
     #panelWrap {
@@ -392,6 +378,8 @@
       width: 50%;
       flex-shrink: 0;
       min-width: 0;
+      padding: 0 14px;
+      box-sizing: border-box;
     }
     /* month slide animation */
     #scrollArea {
@@ -752,7 +740,7 @@
   <div>
     <div class="mnav">
       <button class="mb" id="btnPrevM">‹</button>
-      <span id="mLabel" id="mLabel" style="cursor:pointer" onclick="openMonthPicker()"></span>
+      <span id="mLabel" style="cursor:pointer" onclick="openMonthPicker()"></span>
       <button class="mb" id="btnNextM">›</button>
     </div>
   </div>
@@ -872,43 +860,102 @@
   const SK     = 'kakeibo_v2';
   const SK_LBL = 'kakeibo_labels';
   const SK_BDG = 'kakeibo_budget';
+  const IDB_NAME = 'kakeibo_db';
+  const IDB_VER  = 1;
+  const IDB_STORE = 'data';
+
+  /* ── IndexedDB 層 ── */
+  let _idb = null;
+
+  function openIDB() {
+    return new Promise((res, rej) => {
+      if (_idb) { res(_idb); return; }
+      const req = indexedDB.open(IDB_NAME, IDB_VER);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE))
+          db.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = e => { _idb = e.target.result; res(_idb); };
+      req.onerror   = () => rej(req.error);
+    });
+  }
+
+  function idbSet(key, val) {
+    return openIDB().then(db => new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = res;
+      tx.onerror    = () => rej(tx.error);
+    })).catch(() => {});
+  }
+
+  function idbGet(key) {
+    return openIDB().then(db => new Promise((res, rej) => {
+      const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => res(req.result);
+      req.onerror   = () => rej(req.error);
+    })).catch(() => null);
+  }
+
+  /* ── 工具函式（雙寫：IDB 主要 + localStorage 備份）── */
+  const save = () => {
+    const v = JSON.stringify(recs);
+    idbSet(SK, v);
+    try { localStorage.setItem(SK, v); } catch(e) {}
+  };
+  const saveLbl = () => {
+    const v = JSON.stringify(getCustomLabels());
+    idbSet(SK_LBL, v);
+    try { localStorage.setItem(SK_LBL, v); } catch(e) {}
+  };
+  const saveBdg = () => {
+    const v = String(budget);
+    idbSet(SK_BDG, v);
+    try { localStorage.setItem(SK_BDG, v); } catch(e) {}
+  };
+  /* ── 讀取（優先 IDB，fallback localStorage）── */
+  async function loadAll() {
+    // recs
+    try {
+      const v = await idbGet(SK);
+      if (v) { recs = JSON.parse(v); }
+      else {
+        const ls = localStorage.getItem(SK);
+        if (ls) { recs = JSON.parse(ls); idbSet(SK, ls); } // 遷移舊資料
+      }
+    } catch(e) {
+      try { const ls = localStorage.getItem(SK); if (ls) recs = JSON.parse(ls); } catch(e2) {}
+    }
+    // labels
+    try {
+      const v = await idbGet(SK_LBL) || localStorage.getItem(SK_LBL);
+      if (v) {
+        const saved = JSON.parse(v);
+        CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].lbl = saved[k]; });
+      }
+    } catch(e) {}
+    // budget
+    try {
+      const v = await idbGet(SK_BDG) || localStorage.getItem(SK_BDG);
+      if (v !== null && v !== undefined) budget = parseInt(v, 10) || 0;
+    } catch(e) {}
+  }
+
+  // 保留 localStorage 同步備援（供 idbGet fallback 內部使用）
 
   /* ── 全域狀態 ── */
-  let recs      = [];
-  let inp       = '';
-  let cat       = 'food';
+  let recs         = [];
+  let inp          = '';
+  let cat          = 'food';
   let vy, vm;
-  let ctab      = 'list';
-  let collapsed = {};
-  let CATS      = {};
+  let ctab         = 'list';
+  let collapsed    = {};
+  let CATS         = {};
   let renameTarget = null;
-  let budget    = 0;   // 0 = no limit
-  let showBudgetTotal = false; // false = 全部總額, true = 排除免後總額
-
-  /* ── 工具函式 ── */
-  const save    = () => { try { localStorage.setItem(SK, JSON.stringify(recs)); } catch (e) {} };
-  const saveLbl = () => { try { localStorage.setItem(SK_LBL, JSON.stringify(getCustomLabels())); } catch (e) {} };
-  const saveBdg = () => { try { localStorage.setItem(SK_BDG, String(budget)); } catch (e) {} };
-  const loadBdg = () => { try { const v = localStorage.getItem(SK_BDG); if (v !== null) budget = parseInt(v, 10) || 0; } catch (e) {} };
-
-  const load = () => {
-    try {
-      const r = localStorage.getItem(SK);
-      if (r) recs = JSON.parse(r);
-    } catch (e) { recs = []; }
-  };
-
-  const loadLabels = () => {
-    try {
-      const raw = localStorage.getItem(SK_LBL);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        CKEYS.forEach(k => {
-          if (saved[k]) DEFAULT_CATS[k].lbl = saved[k];
-        });
-      }
-    } catch (e) {}
-  };
+  let budget       = 0;
+  let showBudgetTotal = false;
+  let _nextId = Date.now(); // 自增 id，避免同毫秒碰撞
 
   const getCustomLabels = () => {
     const out = {};
@@ -1076,11 +1123,26 @@
   }
 
   /* ── 初始化 ── */
-  function init() {
-    load();
-    loadLabels();
-    loadBdg();
+  async function init() {
+    await loadAll();
     rebuildCats();
+    // 從現有資料的最大 id 繼續，避免重複
+    if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
+
+    // 請求持久化儲存 + 空間偵測
+    if (navigator.storage) {
+      if (navigator.storage.persist) {
+        navigator.storage.persist().catch(() => {});
+      }
+      if (navigator.storage.estimate) {
+        navigator.storage.estimate().then(est => {
+          const remainingMB = (est.quota - est.usage) / 1024 / 1024;
+          if (remainingMB < 100) {
+            toast('⚠️ 裝置空間不足，記帳資料可能有遺失風險');
+          }
+        }).catch(() => {});
+      }
+    }
 
     const now = new Date();
     vy = now.getFullYear();
@@ -1232,7 +1294,7 @@
     if (!dv) { toast('請選日期'); return; }
 
     const note = document.getElementById('noteInp').value.trim();
-    recs.unshift({ id: Date.now(), date: dv, cat, amt, note });
+    recs.unshift({ id: _nextId++, date: dv, cat, amt, note });
     save();
 
     inp = '';
@@ -1323,7 +1385,7 @@
       const diff = budgetTotal - budget;
       tNum.textContent = showBudgetTotal ? ('-' + diff.toLocaleString()) : total.toLocaleString();
       tEl.classList.toggle('over', showBudgetTotal);
-      hint.textContent = '超出上限 NT$' + budget.toLocaleString();
+      hint.textContent = showBudgetTotal ? '超出上限 NT$' + budget.toLocaleString() : '⚠ 預算內已超出';
       hint.className = 'over';
     } else {
       tNum.textContent = displayTotal.toLocaleString();
@@ -1450,21 +1512,23 @@
   }
 
   /* ── Toast ── */
+  let _toastTimer = null;
   function toast(msg) {
     const el = document.getElementById('toast');
     el.textContent = msg;
     el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), 2000);
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
   }
 
   /* ── 匯出 CSV ── */
   function exportCSV() {
     if (recs.length === 0) { toast('沒有資料可以匯出'); return; }
-    const header = '日期,分類,金額,備註';
+    const header = '日期,分類,金額,備註,不計入預算';
     const rows = recs.map(r => {
       const c    = CATS[r.cat] || CATS.daily;
       const note = (r.note || '').replace(/,/g, '，').replace(/\n/g, ' ');
-      return `${r.date},${c.lbl},${r.amt},${note}`;
+      return `${r.date},${c.lbl},${r.amt},${note},${r.exempt ? '是' : ''}`;
     });
     const csv  = '\uFEFF' + header + '\n' + rows.join('\n'); // BOM for Excel
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -1546,9 +1610,11 @@
   /* ── Swipe on top bar for month ── */
   function setupMonthSwipe() {
     const top = document.getElementById('top');
-    let sx = 0, moved = false;
+    let sx = 0, moved = false, blocked = false;
 
     top.addEventListener('touchstart', e => {
+      // 不在 totalAmt 區塊才允許月份滑動
+      blocked = !!e.target.closest('#totalAmt, [onclick="toggleTotalMode()"]');
       sx = e.touches[0].clientX;
       moved = false;
     }, { passive: true });
@@ -1556,11 +1622,13 @@
     top.addEventListener('touchmove', e => { moved = true; }, { passive: true });
 
     top.addEventListener('touchend', e => {
-      if (!moved) return;
+      if (!moved || blocked) { blocked = false; return; }
       const dx = e.changedTouches[0].clientX - sx;
       if (Math.abs(dx) < 40) return;
       chM(dx < 0 ? 1 : -1);
     }, { passive: true });
+
+    top.addEventListener('touchcancel', () => { blocked = false; moved = false; }, { passive: true });
   }
 
   init();
