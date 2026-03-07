@@ -217,8 +217,16 @@
     .ri-info  { flex: 1; min-width: 0; }
     .ri-note  { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ri-cat   { font-size: 10px; color: var(--muted); margin-top: 1px; }
-    .ri-amt   { font-family: "Montserrat", sans-serif; font-size: 15px; font-weight: 800; white-space: nowrap; }
+    .ri-amt   { font-family: "Montserrat", sans-serif; font-size: 15px; font-weight: 800; white-space: nowrap; cursor: pointer; }
     .ri-amt small { font-size: 10px; color: var(--muted); font-weight: 500; margin-right: 1px; }
+    .ri-amt.exempt { color: var(--muted); }
+    .ri-amt.exempt::before {
+      content: '🚫';
+      font-size: 11px;
+      margin-right: 4px;
+      vertical-align: 0px;
+      opacity: .6;
+    }
 
     .ri-del {
       background: none;
@@ -383,10 +391,12 @@
     .swipe-panel {
       width: 50%;
       flex-shrink: 0;
+      min-width: 0;
     }
     /* month slide animation */
     #scrollArea {
-      overflow: hidden;
+      overflow-x: clip;
+      overflow-y: visible;
     }
 
     .kb-r2 { display: flex; }
@@ -539,6 +549,34 @@
     #renameOkBtn     { background: linear-gradient(135deg, #ebb8b8, #d49898); color: #fff; }
     #renameCancelBtn:active { background: rgba(220,170,170,0.28); }
     #renameOkBtn:active     { background: var(--accent); }
+
+    #totalModeTip {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 150;
+    }
+    #totalModeTip span {
+      background: rgba(140,111,111,0.82);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      padding: 5px 14px;
+      border-radius: 0 0 12px 12px;
+      opacity: 0;
+      transform: translateY(-100%);
+      transition: opacity .2s, transform .2s;
+      white-space: nowrap;
+    }
+    #totalModeTip span.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
 
     /* ── Toast ── */
     #toast {
@@ -718,11 +756,14 @@
       <button class="mb" id="btnNextM">›</button>
     </div>
   </div>
-  <div style="text-align:right">
+  <div style="text-align:right;cursor:pointer" onclick="toggleTotalMode()">
     <div id="totalAmt"><span class="cur">NT$</span><span id="tNum">0</span></div>
     <div id="budgetHint"></div>
   </div>
 </div>
+
+<!-- TOTAL MODE TIP -->
+<div id="totalModeTip"></div>
 
 <!-- TABS -->
 <div id="tabs">
@@ -842,6 +883,7 @@
   let CATS      = {};
   let renameTarget = null;
   let budget    = 0;   // 0 = no limit
+  let showBudgetTotal = false; // false = 全部總額, true = 排除免後總額
 
   /* ── 工具函式 ── */
   const save    = () => { try { localStorage.setItem(SK, JSON.stringify(recs)); } catch (e) {} };
@@ -987,6 +1029,21 @@
     grid.addEventListener('mouseleave', () => cancelPress());
   }
 
+  /* ── 切換總額顯示模式 ── */
+  let totalModeTipTimer = null;
+  function toggleTotalMode() {
+    showBudgetTotal = !showBudgetTotal;
+    render();
+    // 浮動提示
+    const tip = document.getElementById('totalModeTip');
+    if (!tip.querySelector('span')) tip.innerHTML = '<span></span>';
+    const s = tip.querySelector('span');
+    s.textContent = showBudgetTotal ? '顯示：預算內' : '顯示：全部';
+    s.classList.add('show');
+    clearTimeout(totalModeTipTimer);
+    totalModeTipTimer = setTimeout(() => s.classList.remove('show'), 1000);
+  }
+
   /* ── 花費上限 Modal ── */
   function openBudget() {
     const el = document.getElementById('budgetInput');
@@ -1054,14 +1111,13 @@
     });
     document.getElementById('mLabel').onclick = openMonthPicker;
 
-    // 花費上限
+    // 花費上限 — 右鍵或長按總金額區
     document.getElementById('totalAmt').addEventListener('contextmenu', e => { e.preventDefault(); openBudget(); });
-    // long press for mobile
     let budgetPressTimer = null;
-    document.getElementById('totalAmt').addEventListener('touchstart', () => {
-      budgetPressTimer = setTimeout(openBudget, 500);
+    document.getElementById('totalAmt').addEventListener('touchstart', e => {
+      budgetPressTimer = setTimeout(() => { e.stopPropagation(); openBudget(); }, 600);
     }, { passive: true });
-    document.getElementById('totalAmt').addEventListener('touchend', () => clearTimeout(budgetPressTimer), { passive: true });
+    document.getElementById('totalAmt').addEventListener('touchend',  () => clearTimeout(budgetPressTimer), { passive: true });
     document.getElementById('totalAmt').addEventListener('touchmove', () => clearTimeout(budgetPressTimer), { passive: true });
 
     document.getElementById('budgetCancelBtn').onclick = closeBudget;
@@ -1190,6 +1246,16 @@
     toast(CATS[cat].icon + ' NT$' + amt.toLocaleString());
   }
 
+  /* ── 切換免計入預算 ── */
+  function toggleExempt(id) {
+    const r = recs.find(r => r.id === id);
+    if (!r) return;
+    r.exempt = !r.exempt;
+    save();
+    render();
+    toast(r.exempt ? '已從預算中排除' : '已計入預算');
+  }
+
   /* ── 刪除記帳 ── */
   function delRec(id) {
     recs = recs.filter(r => r.id !== id);
@@ -1244,22 +1310,26 @@
     document.getElementById('mLabel').textContent = vy + '．' + mn[vm];
     const mrs   = getMrs();
     const total = mrs.reduce((s, r) => s + r.amt, 0);
+    const budgetTotal = mrs.reduce((s, r) => s + (r.exempt ? 0 : r.amt), 0);
 
     const tEl   = document.getElementById('totalAmt');
     const tNum  = document.getElementById('tNum');
     const hint  = document.getElementById('budgetHint');
 
-    if (budget > 0 && total > budget) {
-      const diff = total - budget;
-      tNum.textContent = '-' + diff.toLocaleString();
-      tEl.classList.add('over');
+    const displayTotal = showBudgetTotal ? budgetTotal : total;
+
+    // 預算超出判斷（永遠以 budgetTotal 為準）
+    if (budget > 0 && budgetTotal > budget) {
+      const diff = budgetTotal - budget;
+      tNum.textContent = showBudgetTotal ? ('-' + diff.toLocaleString()) : total.toLocaleString();
+      tEl.classList.toggle('over', showBudgetTotal);
       hint.textContent = '超出上限 NT$' + budget.toLocaleString();
       hint.className = 'over';
     } else {
-      tNum.textContent = total.toLocaleString();
+      tNum.textContent = displayTotal.toLocaleString();
       tEl.classList.remove('over');
       if (budget > 0) {
-        const rem = budget - total;
+        const rem = budget - budgetTotal;
         hint.textContent = '上限 NT$' + budget.toLocaleString() + '　剩 ' + rem.toLocaleString();
         hint.className = '';
       } else {
@@ -1271,12 +1341,13 @@
     // ensure correct panel visible
     const wrap = document.getElementById('panelWrap');
     if (wrap) wrap.style.transform = ctab === 'list' ? 'translateX(0)' : 'translateX(-50%)';
-    renderList(mrs);
-    renderAna(mrs, total);
+    const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
+    renderList(displayMrs, mrs);
+    renderAna(displayMrs, displayTotal);
   }
 
   /* ── 列表渲染 ── */
-  function renderList(mrs) {
+  function renderList(mrs, allMrs) {
     const lp = document.getElementById('listPanel');
     if (mrs.length === 0) {
       lp.innerHTML = '<div class="empty"><div class="empty-ico">🌸</div>這個月還沒有記帳</div>';
@@ -1301,7 +1372,7 @@
             <div class="ri-note">${r.note ? esc(r.note) : c.lbl}</div>
             <div class="ri-cat">${c.lbl}</div>
           </div>
-          <div class="ri-amt"><small>$</small>${r.amt.toLocaleString()}</div>
+          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="toggleExempt(${r.id})" title="點擊切換是否計入預算"><small>$</small>${r.amt.toLocaleString()}</div>
           <button class="ri-del" onclick="delRec(${r.id})">✕</button>
         </div>`;
       }).join('');
@@ -1450,26 +1521,26 @@
   /* ── Swipe on scroll area ── */
   function setupSwipe() {
     const area = document.getElementById('scrollArea');
-    let sx = 0, sy = 0, moved = false;
+    let sx = 0, sy = 0, tracking = false;
 
     area.addEventListener('touchstart', e => {
       sx = e.touches[0].clientX;
       sy = e.touches[0].clientY;
-      moved = false;
-    }, { passive: true });
-
-    area.addEventListener('touchmove', e => {
-      moved = true;
+      tracking = true;
     }, { passive: true });
 
     area.addEventListener('touchend', e => {
-      if (!moved) return;
+      if (!tracking) return;
+      tracking = false;
       const dx = e.changedTouches[0].clientX - sx;
       const dy = e.changedTouches[0].clientY - sy;
-      if (Math.abs(dx) < 40 || Math.abs(dy) > Math.abs(dx) * 0.8) return;
+      // require horizontal swipe ≥30px and more horizontal than vertical
+      if (Math.abs(dx) < 30 || Math.abs(dy) > Math.abs(dx)) return;
       if (dx < 0 && ctab === 'list') goTab('ana');
       else if (dx > 0 && ctab === 'ana') goTab('list');
     }, { passive: true });
+
+    area.addEventListener('touchcancel', () => { tracking = false; }, { passive: true });
   }
 
   /* ── Swipe on top bar for month ── */
