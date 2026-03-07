@@ -343,20 +343,18 @@
     }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
-    #dateInp {
-      border: none;
-      background: transparent;
+    #dateLbl {
       font-family: "Noto Sans TC", sans-serif;
       font-size: 11px;
       color: var(--muted);
       cursor: pointer;
       text-align: right;
       flex-shrink: 0;
-      padding: 0;
-      -webkit-user-select: auto;
-      user-select: auto;
-      margin-left: auto;
+      white-space: nowrap;
+      padding: 2px 0;
+      border-bottom: 1px dashed rgba(168,136,136,0.4);
     }
+    #dateLbl:active { opacity: .6; }
 
     #saveBtn {
       background: none;
@@ -747,7 +745,8 @@
       <span class="cur">NT$</span><span id="aN" class="ph">0</span><span class="kb-cur" id="kc"></span>
     </div>
     <button id="saveBtn" onclick="exportCSV()" title="匯出CSV">💾</button>
-    <input type="date" id="dateInp">
+    <span id="dateLbl" onclick="document.getElementById('dateInp').showPicker ? document.getElementById('dateInp').showPicker() : document.getElementById('dateInp').click()"></span>
+    <input type="date" id="dateInp" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;">
   </div>
   <div class="kb-r2">
     <input class="note-inp" id="noteInp" type="text" placeholder="備註（選填）" autocomplete="off">
@@ -1010,6 +1009,15 @@
     toast(budget > 0 ? '上限設為 NT$' + budget.toLocaleString() : '已取消上限');
   }
 
+  /* ── 更新日期標籤顯示 ── */
+  function updateDateLbl() {
+    const v = document.getElementById('dateInp').value;
+    const lbl = document.getElementById('dateLbl');
+    if (!v) { lbl.textContent = '選擇日期'; return; }
+    const d = new Date(v + 'T00:00:00');
+    lbl.textContent = d.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
+  }
+
   /* ── 初始化 ── */
   function init() {
     load();
@@ -1021,6 +1029,8 @@
     vy = now.getFullYear();
     vm = now.getMonth();
     document.getElementById('dateInp').value = fmtD(now);
+    updateDateLbl();
+    document.getElementById('dateInp').addEventListener('change', updateDateLbl);
 
     renderCatBtns();
     setupLongPress();
