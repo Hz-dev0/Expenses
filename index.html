@@ -1079,6 +1079,21 @@
 
     // 數字鍵盤：touchstart event delegation
     const grid = document.getElementById('kbGrid');
+    let delInterval = null;
+    let delTimeout  = null;
+
+    const startDel = () => {
+      nd();
+      delTimeout = setTimeout(() => {
+        delInterval = setInterval(() => { nd(); }, 80);
+      }, 400);
+    };
+    const stopDel = () => {
+      clearTimeout(delTimeout);
+      clearInterval(delInterval);
+      delTimeout = delInterval = null;
+    };
+
     grid.addEventListener('touchstart', e => {
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
@@ -1086,18 +1101,23 @@
       btn.classList.add('pressed');
       setTimeout(() => btn.classList.remove('pressed'), 90);
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
-      else if (btn.dataset.del !== undefined) nd();
+      else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     }, { passive: false });
+
+    grid.addEventListener('touchend',    e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
+    grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
 
     // 桌機 mousedown fallback（數字鍵）
     grid.addEventListener('mousedown', e => {
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
-      else if (btn.dataset.del !== undefined) nd();
+      else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     });
+    grid.addEventListener('mouseup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('mouseleave', e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
     document.getElementById('renameCancelBtn').onclick = closeRename;
