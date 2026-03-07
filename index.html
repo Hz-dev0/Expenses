@@ -367,6 +367,13 @@
     #dateLbl:active { opacity: .6; }
 
     /* ── Panel wrap for swipe ── */
+    #scrollArea {
+      overflow: visible;
+    }
+    #panelClip {
+      overflow: hidden;
+      width: 100%;
+    }
     #panelWrap {
       display: flex;
       width: 200%;
@@ -380,11 +387,6 @@
       min-width: 0;
       padding: 0 14px;
       box-sizing: border-box;
-    }
-    /* month slide animation */
-    #scrollArea {
-      overflow-x: clip;
-      overflow-y: visible;
     }
 
     .kb-r2 { display: flex; }
@@ -761,9 +763,11 @@
 
 <!-- SCROLL AREA with swipe support -->
 <div id="scrollArea">
-  <div id="panelWrap">
-    <div id="listPanel" class="swipe-panel"></div>
-    <div id="anaPanel"  class="swipe-panel"></div>
+  <div id="panelClip">
+    <div id="panelWrap">
+      <div id="listPanel" class="swipe-panel"></div>
+      <div id="anaPanel"  class="swipe-panel"></div>
+    </div>
   </div>
 </div>
 
