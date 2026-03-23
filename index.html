@@ -458,18 +458,7 @@
     .cbt.on      { background: var(--rose); border-color: var(--rose); box-shadow: 0 2px 8px rgba(220,160,160,0.4); }
     .cbt.pressed { opacity: .65; }
 
-    /* 長按提示小點 */
-    .cbt::after {
-      content: '';
-      position: absolute;
-      bottom: 4px;
-      right: 4px;
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: rgba(140,111,111,0.35);
-    }
-    .cbt.on::after { background: rgba(255,255,255,0.55); }
+
 
     /* ── 重新命名 Modal ── */
     #renameOverlay {
@@ -726,6 +715,76 @@
     .mp-m.on { background: var(--rose); color: #fff; border-color: var(--rose); }
     .mp-m:active { opacity: .7; }
 
+    /* ── Emoji Picker Modal ── */
+    #emojiOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(74,58,58,0.45);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 300;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    #emojiOverlay.open { display: flex; }
+
+    #emojiBox {
+      background: var(--card);
+      border-radius: 22px 22px 0 0;
+      padding: 18px 16px max(env(safe-area-inset-bottom, 0px), 16px);
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 -4px 32px rgba(200,140,140,0.22);
+      animation: slideUp .2s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to   { transform: translateY(0); }
+    }
+    #emojiTitle {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    #emojiGrid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      max-height: 260px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .emoji-btn {
+      font-size: 24px;
+      line-height: 1;
+      border: 1.5px solid transparent;
+      border-radius: 10px;
+      background: rgba(235,185,185,0.08);
+      cursor: pointer;
+      padding: 6px 2px;
+      text-align: center;
+      transition: background .1s;
+    }
+    .emoji-btn:active { background: var(--rose); border-color: var(--rose); }
+    #emojiCancelBtn {
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px 0;
+      border-radius: 50px;
+      border: none;
+      background: rgba(220,170,170,0.15);
+      color: var(--muted);
+      font-family: "Noto Sans TC", sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #emojiCancelBtn:active { background: rgba(220,170,170,0.28); }
+
     /* ── Month slide transition ── */
     @keyframes slideInLeft {
       from { opacity: 0; transform: translateX(-40px); }
@@ -852,6 +911,15 @@
   </div>
 </div>
 
+<!-- EMOJI PICKER MODAL -->
+<div id="emojiOverlay">
+  <div id="emojiBox">
+    <div id="emojiTitle">點選新圖示</div>
+    <div id="emojiGrid"></div>
+    <button id="emojiCancelBtn">取消</button>
+  </div>
+</div>
+
 <!-- TOAST -->
 <div id="toast"></div>
 
@@ -966,6 +1034,18 @@
       if (idbVal && !lsVal) { try { localStorage.setItem(SK_BDG, idbVal); } catch(e) {} }
       if (!idbVal && lsVal) { idbSet(SK_BDG, lsVal); }
     } catch(e) {}
+    // icons
+    try {
+      const idbVal = await idbGet(SK_ICONS);
+      const lsVal  = localStorage.getItem(SK_ICONS);
+      const v = idbVal || lsVal;
+      if (v) {
+        const saved = JSON.parse(v);
+        CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].icon = saved[k]; });
+        if (idbVal && !lsVal) { try { localStorage.setItem(SK_ICONS, idbVal); } catch(e) {} }
+        if (!idbVal && lsVal) { idbSet(SK_ICONS, lsVal); }
+      }
+    } catch(e) {}
     // budget mode
     try {
       const idbVal = await idbGet(SK_MODE);
@@ -1052,12 +1132,82 @@
     render(); // 分析頁標籤也要同步
   }
 
+  /* ── Emoji Picker ── */
+  const EMOJI_LIST = [
+    '🍴','🍱','🍜','🍛','🥗','🥩','🍕','🍔','🌮','🍣','🍩','🧋','☕','🍺','🍷',
+    '🍫','🍰','🧁','🍿','🍪','🍬','🍦','🧃','🥤',
+    '✨','🎮','🎬','🎵','🎤','🎨','📺','🎁','🎟️','🏀','⚽','🎯','🎲','🎸',
+    '🧻','🧴','🧹','🏠','💊','🏥','🚌','✈️','🚗','⛽','🚿','🛒','👗','👟','💄','💍','💼','📚','🖥️','📱','🔌','💡',
+    '💰','💳','🏦','📦','🐶','🐱','🌸','🌿','☀️','🌙','❤️','⭐','🔥','💎','🎀'
+  ];
+
+  const SK_ICONS = 'kakeibo_icons';
+  let emojiTarget = null;
+
+  function loadCustomIcons() {
+    try {
+      const v = localStorage.getItem(SK_ICONS);
+      if (v) {
+        const saved = JSON.parse(v);
+        CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].icon = saved[k]; });
+      }
+    } catch(e) {}
+  }
+
+  function saveCustomIcons() {
+    const out = {};
+    CKEYS.forEach(k => { out[k] = CATS[k].icon; });
+    const v = JSON.stringify(out);
+    idbSet(SK_ICONS, v);
+    try { localStorage.setItem(SK_ICONS, v); } catch(e) {}
+  }
+
+  function openEmojiPicker(key) {
+    emojiTarget = key;
+    const overlay = document.getElementById('emojiOverlay');
+    const title   = document.getElementById('emojiTitle');
+    title.textContent = CATS[key].icon + '  選擇新圖示';
+    const grid = document.getElementById('emojiGrid');
+    grid.innerHTML = EMOJI_LIST.map(e =>
+      `<button class="emoji-btn" data-emoji="${e}">${e}</button>`
+    ).join('');
+    overlay.classList.add('open');
+  }
+
+  function closeEmojiPicker() {
+    document.getElementById('emojiOverlay').classList.remove('open');
+    emojiTarget = null;
+  }
+
+  function setupEmojiPicker() {
+    document.getElementById('emojiCancelBtn').onclick = closeEmojiPicker;
+    document.getElementById('emojiOverlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('emojiOverlay')) closeEmojiPicker();
+    });
+    document.getElementById('emojiGrid').addEventListener('click', e => {
+      const btn = e.target.closest('.emoji-btn');
+      if (!btn || !emojiTarget) return;
+      const emoji = btn.dataset.emoji;
+      CATS[emojiTarget].icon = emoji;
+      DEFAULT_CATS[emojiTarget].icon = emoji;
+      saveCustomIcons();
+      renderCatBtns();
+      render();
+      closeEmojiPicker();
+      toast('已更新圖示 ' + emoji);
+    });
+  }
+
   /* ── 長按偵測（touchstart / mousedown） ── */
   function setupLongPress() {
     const grid       = document.getElementById('kbGrid');
     let pressTimer   = null;
     let pressedBtn   = null;
     let didLongPress = false;
+
+    // Double-tap detection for emoji picker
+    let lastTapTime  = 0;
+    let lastTapKey   = null;
 
     const startPress = (btn) => {
       didLongPress = false;
@@ -1086,6 +1236,17 @@
       cancelPress();
       if (btn && !didLongPress) {
         e.preventDefault();
+        const now = Date.now();
+        const key = btn.dataset.c;
+        if (now - lastTapTime < 350 && lastTapKey === key) {
+          // double tap → emoji picker
+          lastTapTime = 0;
+          lastTapKey = null;
+          openEmojiPicker(key);
+          return;
+        }
+        lastTapTime = now;
+        lastTapKey  = key;
         btn.classList.add('pressed');
         setTimeout(() => btn.classList.remove('pressed'), 90);
         sc(btn.dataset.c);
@@ -1106,6 +1267,12 @@
       const btn = e.target.closest('.cbt');
       cancelPress();
       if (btn && !didLongPress) sc(btn.dataset.c);
+    });
+
+    grid.addEventListener('dblclick', e => {
+      const btn = e.target.closest('.cbt');
+      if (!btn) return;
+      openEmojiPicker(btn.dataset.c);
     });
 
     grid.addEventListener('mouseleave', () => cancelPress());
@@ -1202,6 +1369,7 @@
 
     renderCatBtns();
     setupLongPress();
+    setupEmojiPicker();
 
     // 月份按鈕
     document.getElementById('btnPrevM').addEventListener('touchstart', e => { e.preventDefault(); chM(-1); }, { passive: false });
