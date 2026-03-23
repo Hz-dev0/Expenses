@@ -865,9 +865,10 @@
   };
   const CKEYS  = Object.keys(DEFAULT_CATS);
   const CAT_C  = ['#e8b8b8', '#b8d4e8', '#b8e8cc', '#e8ddb8'];
-  const SK     = 'kakeibo_v2';
-  const SK_LBL = 'kakeibo_labels';
-  const SK_BDG = 'kakeibo_budget';
+  const SK      = 'kakeibo_v2';
+  const SK_LBL  = 'kakeibo_labels';
+  const SK_BDG  = 'kakeibo_budget';
+  const SK_MODE = 'kakeibo_budget_mode';
   const IDB_NAME = 'kakeibo_db';
   const IDB_VER  = 1;
   const IDB_STORE = 'data';
@@ -964,6 +965,15 @@
       if (v !== null && v !== undefined) budget = parseInt(v, 10) || 0;
       if (idbVal && !lsVal) { try { localStorage.setItem(SK_BDG, idbVal); } catch(e) {} }
       if (!idbVal && lsVal) { idbSet(SK_BDG, lsVal); }
+    } catch(e) {}
+    // budget mode
+    try {
+      const idbVal = await idbGet(SK_MODE);
+      const lsVal  = localStorage.getItem(SK_MODE);
+      const v = idbVal ?? lsVal;
+      if (v !== null && v !== undefined) showBudgetTotal = (v === '1');
+      if (idbVal && !lsVal) { try { localStorage.setItem(SK_MODE, idbVal); } catch(e) {} }
+      if (!idbVal && lsVal) { idbSet(SK_MODE, lsVal); }
     } catch(e) {}
   }
 
@@ -1102,9 +1112,15 @@
   }
 
   /* ── 切換總額顯示模式 ── */
+  const saveMode = () => {
+    const v = showBudgetTotal ? '1' : '0';
+    idbSet(SK_MODE, v);
+    try { localStorage.setItem(SK_MODE, v); } catch(e) {}
+  };
   let totalModeTipTimer = null;
   function toggleTotalMode() {
     showBudgetTotal = !showBudgetTotal;
+    saveMode();
     render();
     // 浮動提示
     const tip = document.getElementById('totalModeTip');
@@ -1670,6 +1686,7 @@
       save();
       saveLbl();
       saveBdg();
+      saveMode();
     }
   });
 
@@ -1678,6 +1695,7 @@
     save();
     saveLbl();
     saveBdg();
+    saveMode();
   });
 
   init();
