@@ -1544,48 +1544,27 @@
   let listFilterUnlinked = false;
 
   function setupListLongPress() {
-    // Android 長按會觸發 contextmenu 打斷 touchend，
-    // 所以改成直接在 ri-info 元素上用 oncontextmenu + ontouchstart
-    // 這個函式只需要把 document 的 contextmenu 阻止掉
-    document.addEventListener('contextmenu', e => {
-      if (e.target.closest('.ri-info')) {
-        e.preventDefault();
-        return false;
-      }
+    const btn = document.getElementById('tabList');
+    let timer = null;
+
+    btn.addEventListener('pointerdown', () => {
+      timer = setTimeout(() => {
+        timer = null;
+        if (navigator.vibrate) navigator.vibrate(40);
+        listFilterUnlinked = !listFilterUnlinked;
+        goTab('list');
+        toast(listFilterUnlinked ? '🔍 只顯示未關聯項目' : '顯示全部');
+      }, 500);
     });
+
+    btn.addEventListener('pointerup',     () => { clearTimeout(timer); timer = null; });
+    btn.addEventListener('pointerleave',  () => { clearTimeout(timer); timer = null; });
+    btn.addEventListener('pointercancel', () => { clearTimeout(timer); timer = null; });
   }
 
-  /* ── ri-info 長按處理（直接 inline 在 HTML） ── */
-  let _lpTimer = null;
-  let _lpSx = 0, _lpSy = 0;
-
-  function riLongPressStart(e) {
-    const touch = e.touches ? e.touches[0] : e;
-    _lpSx = touch.clientX;
-    _lpSy = touch.clientY;
-    clearTimeout(_lpTimer);
-    _lpTimer = setTimeout(() => {
-      _lpTimer = null;
-      if (navigator.vibrate) navigator.vibrate(40);
-      listFilterUnlinked = !listFilterUnlinked;
-      render();
-      toast(listFilterUnlinked ? '🔍 只顯示未關聯項目' : '顯示全部');
-    }, 500);
-  }
-
-  function riLongPressMove(e) {
-    if (!_lpTimer) return;
-    const touch = e.touches ? e.touches[0] : e;
-    if (Math.abs(touch.clientX - _lpSx) > 8 || Math.abs(touch.clientY - _lpSy) > 8) {
-      clearTimeout(_lpTimer);
-      _lpTimer = null;
-    }
-  }
-
-  function riLongPressEnd() {
-    clearTimeout(_lpTimer);
-    _lpTimer = null;
-  }
+  function riLongPressStart() {}
+  function riLongPressMove() {}
+  function riLongPressEnd() {}
   /* 結構: bdgPlan[catKey] = { budget, subs:[{id,name,budget}], open } */
   const SK_BDGPLAN = 'kakeibo_bdgplan';
   let bdgPlan = {}; // keyed by catKey
@@ -2267,11 +2246,8 @@
         return `<div class="ri${r.exempt ? ' exempt-row' : ''}">
           <div class="ri-ico" style="cursor:pointer" onclick="openTreePicker(${r.id})" title="點擊關聯預算">${c.icon}</div>
           <div class="ri-info"
-            ontouchstart="riLongPressStart(event)"
-            ontouchmove="riLongPressMove(event)"
-            ontouchend="riLongPressEnd()"
-            ontouchcancel="riLongPressEnd()"
             oncontextmenu="return false"
+            style="-webkit-user-select:none;user-select:none;touch-action:manipulation"
           >
             <div class="ri-note">${r.note ? esc(r.note) : c.lbl}</div>
             <div class="ri-cat">${c.lbl}${bdgTag}</div>
