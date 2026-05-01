@@ -1547,19 +1547,19 @@
     const btn = document.getElementById('tabList');
     let timer = null;
 
-    btn.addEventListener('pointerdown', () => {
+    btn.addEventListener('touchstart', e => {
+      e.stopPropagation();
       timer = setTimeout(() => {
         timer = null;
         if (navigator.vibrate) navigator.vibrate(40);
         listFilterUnlinked = !listFilterUnlinked;
-        goTab('list');
+        render();
         toast(listFilterUnlinked ? '🔍 只顯示未關聯項目' : '顯示全部');
-      }, 500);
-    });
+      }, 600);
+    }, { passive: true });
 
-    btn.addEventListener('pointerup',     () => { clearTimeout(timer); timer = null; });
-    btn.addEventListener('pointerleave',  () => { clearTimeout(timer); timer = null; });
-    btn.addEventListener('pointercancel', () => { clearTimeout(timer); timer = null; });
+    btn.addEventListener('touchend',    () => { clearTimeout(timer); timer = null; }, { passive: true });
+    btn.addEventListener('touchcancel', () => { clearTimeout(timer); timer = null; }, { passive: true });
   }
 
   function riLongPressStart() {}
