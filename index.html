@@ -878,6 +878,14 @@
     .bdgp-sub-main { flex: 1; min-width: 0; }
     .bdgp-sub-top-row { display: flex; align-items: center; gap: 5px; }
     .bdgp-sub-name { flex: 1; font-size: 12px; font-weight: 600; color: var(--text); }
+    .bdgp-sub-name-inp {
+      flex: 1; font-size: 12px; font-weight: 600; color: var(--text);
+      border: none; border-bottom: 1.5px solid transparent; border-radius: 0;
+      background: transparent; outline: none; padding: 1px 2px;
+      font-family: "Noto Sans TC", sans-serif;
+      -webkit-user-select: auto; user-select: auto; min-width: 0;
+    }
+    .bdgp-sub-name-inp:focus { border-bottom-color: var(--rose); }
     .bdgp-sub-right { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
     .bdgp-sub-spent { font-family: "Montserrat",sans-serif; font-size: 12px; font-weight: 700; color: var(--roseDk); }
     .bdgp-sub-spent.over { color: var(--danger); }
@@ -1652,7 +1660,15 @@
           <span class="bdgp-sub-dot"></span>
           <div class="bdgp-sub-main">
             <div class="bdgp-sub-top-row">
-              <span class="bdgp-sub-name">${esc(s.name)}</span>
+              <input
+                class="bdgp-sub-name-inp"
+                type="text"
+                value="${esc(s.name)}"
+                maxlength="12"
+                onblur="renameBdgSub('${k}',${s.id},this.value)"
+                onchange="renameBdgSub('${k}',${s.id},this.value)"
+                onclick="event.stopPropagation()"
+              >
               <div class="bdgp-sub-right">
                 <span class="bdgp-sub-spent${sOver?' over':''}">$${ss.toLocaleString()}</span>
                 <span class="bdgp-sub-sep">/</span>
@@ -1696,6 +1712,15 @@
     });
 
     panel.innerHTML = `<div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1.2px;padding:10px 4px 6px">預算規劃</div>${summaryHtml}${itemsHtml}`;
+  }
+
+  function renameBdgSub(k, sid, val) {
+    const plan = bdgPlan[k];
+    if (!plan) return;
+    const s = plan.subs.find(x => x.id === sid);
+    if (!s || !val.trim()) return;
+    s.name = val.trim();
+    saveBdgPlan();
   }
 
   function setBdgSubBudget(k, sid, val) {
@@ -2234,6 +2259,10 @@
 
       const items = g[date].map(r => {
         const c = CATS[r.cat] || CATS.daily;
+        // icon 優先顯示已關聯的預算分類 icon
+        const displayIcon = (r.bdgRef && r.bdgRef.catKey && CATS[r.bdgRef.catKey])
+          ? CATS[r.bdgRef.catKey].icon
+          : c.icon;
         let bdgTag = '';
         if (r.bdgRef && r.bdgRef.catKey) {
           const rc = CATS[r.bdgRef.catKey];
@@ -2244,7 +2273,7 @@
           }
         }
         return `<div class="ri${r.exempt ? ' exempt-row' : ''}">
-          <div class="ri-ico" style="cursor:pointer" onclick="openTreePicker(${r.id})" title="點擊關聯預算">${c.icon}</div>
+          <div class="ri-ico" style="cursor:pointer" onclick="openTreePicker(${r.id})" title="點擊關聯預算">${displayIcon}</div>
           <div class="ri-info"
             oncontextmenu="return false"
             style="-webkit-user-select:none;user-select:none;touch-action:manipulation"
