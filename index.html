@@ -1046,7 +1046,7 @@
     <div id="amtDisp">
       <span class="cur">NT$</span><span id="aN" class="ph">0</span><span class="kb-cur" id="kc"></span>
     </div>
-    <button id="saveBtn" onclick="exportCSV()" title="匯出CSV">💾</button>
+    <button id="saveBtn" onclick="openBackupMenu()" title="備份/還原">💾</button>
     <span id="dateLbl" onclick="document.getElementById('dateInp').showPicker ? document.getElementById('dateInp').showPicker() : document.getElementById('dateInp').click()"></span>
     <input type="date" id="dateInp" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;">
   </div>
@@ -1123,6 +1123,36 @@
     <div id="emojiTitle">點選新圖示</div>
     <div id="emojiGrid"></div>
     <button id="emojiCancelBtn">取消</button>
+  </div>
+</div>
+
+<!-- BACKUP MENU -->
+<div id="backupMenuOverlay" style="display:none;position:fixed;inset:0;background:rgba(74,58,58,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:400;align-items:flex-end;justify-content:center">
+  <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
+    <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:16px">備份 & 還原</div>
+    <button onclick="backupJSON()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
+      <span style="font-size:22px">📥</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text)">備份 JSON</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">下載完整備份（含預算設定）到手機</div>
+      </div>
+    </button>
+    <button onclick="restoreJSON()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
+      <span style="font-size:22px">📤</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text)">還原備份</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">從 JSON 檔案還原所有資料</div>
+      </div>
+    </button>
+    <button onclick="exportCSV()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:16px;cursor:pointer;text-align:left">
+      <span style="font-size:22px">📊</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text)">匯出 CSV</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">用 Excel / Numbers 開啟</div>
+      </div>
+    </button>
+    <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:12px">💡 每新增 5 筆記帳會自動下載備份到手機</div>
+    <button onclick="closeBackupMenu()" style="width:100%;padding:11px 0;border-radius:50px;border:none;background:rgba(220,170,170,0.15);color:var(--muted);font-family:'Noto Sans TC',sans-serif;font-size:13px;font-weight:700;cursor:pointer">取消</button>
   </div>
 </div>
 
@@ -1514,14 +1544,14 @@
   let listFilterUnlinked = false;
 
   function setupListLongPress() {
-    // 用 document 委派，只針對 .ri 內容區（排除按鈕）
     let timer = null;
     let startX = 0, startY = 0;
 
     document.addEventListener('touchstart', e => {
       const ri = e.target.closest('.ri');
       if (!ri) return;
-      if (e.target.closest('button') || e.target.closest('[onclick]')) return;
+      // 只排除真正的按鈕（刪除鍵）
+      if (e.target.closest('button')) return;
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       timer = setTimeout(() => {
@@ -1926,6 +1956,12 @@
       if (e.target === document.getElementById('treeOverlay')) closeTreePicker();
     });
 
+    // backup menu overlay
+    const bmo = document.getElementById('backupMenuOverlay');
+    bmo.style.display = 'flex';
+    bmo.style.display = 'none';
+    bmo.addEventListener('click', e => { if (e.target === bmo) closeBackupMenu(); });
+
     // month picker
     document.getElementById('mpYearPrev').onclick = () => { mpYear--; renderMpYear(); };
     document.getElementById('mpYearNext').onclick = () => { mpYear++; renderMpYear(); };
@@ -2058,6 +2094,7 @@
     const note = document.getElementById('noteInp').value.trim();
     recs.unshift({ id: _nextId++, date: dv, cat, amt, note });
     save();
+    autoBackupIfNeeded();
 
     inp = '';
     ud();
@@ -2363,18 +2400,107 @@
       const note = (r.note || '').replace(/,/g, '，').replace(/\n/g, ' ');
       return `${r.date},${c.lbl},${r.amt},${note},${r.exempt ? '是' : ''}`;
     });
-    const csv  = '\uFEFF' + header + '\n' + rows.join('\n'); // BOM for Excel
+    const csv  = '\uFEFF' + header + '\n' + rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     const now  = new Date();
     a.href     = url;
-    a.download = `記帳_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.csv`;
+    a.download = `記帳_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     toast('已匯出 CSV ↓');
+  }
+
+  /* ── 備份 JSON（完整資料） ── */
+  function backupJSON() {
+    const payload = {
+      v: 2,
+      ts: Date.now(),
+      recs,
+      bdgPlan,
+      labels: (() => { try { return JSON.parse(localStorage.getItem(SK_LBL) || '{}'); } catch(e) { return {}; } })(),
+      budget: (() => { try { return JSON.parse(localStorage.getItem(SK_BDG) || 'null'); } catch(e) { return null; } })(),
+    };
+    const json = JSON.stringify(payload);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const now  = new Date();
+    a.href     = url;
+    a.download = `記帳備份_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('已備份 JSON ↓');
+    closeBackupMenu();
+  }
+
+  /* ── 自動靜默備份（每次新增記帳後，累積 N 筆才下載） ── */
+  const AUTO_BACKUP_EVERY = 5; // 每5筆自動備份一次
+  function autoBackupIfNeeded() {
+    // 用 localStorage 記錄上次備份時的筆數
+    const lastCount = parseInt(localStorage.getItem('kakeibo_last_backup_count') || '0', 10);
+    if (recs.length - lastCount >= AUTO_BACKUP_EVERY) {
+      localStorage.setItem('kakeibo_last_backup_count', String(recs.length));
+      // 靜默下載
+      const payload = { v: 2, ts: Date.now(), recs, bdgPlan };
+      const json = JSON.stringify(payload);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      const now  = new Date();
+      a.href     = url;
+      a.download = `記帳備份_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('💾 已自動備份（每 ' + AUTO_BACKUP_EVERY + ' 筆一次）');
+    }
+  }
+
+  /* ── 還原 JSON ── */
+  function restoreJSON() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (!data.recs || !Array.isArray(data.recs)) throw new Error('格式錯誤');
+        // 確認
+        const ok = confirm(`還原備份？\n共 ${data.recs.length} 筆記錄\n備份時間：${data.ts ? new Date(data.ts).toLocaleString() : '未知'}\n\n⚠️ 這會覆蓋目前所有資料！`);
+        if (!ok) return;
+        recs = data.recs;
+        if (data.bdgPlan && typeof data.bdgPlan === 'object') bdgPlan = data.bdgPlan;
+        initBdgPlan();
+        if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
+        save();
+        saveBdgPlan();
+        render();
+        toast('✅ 已還原 ' + recs.length + ' 筆資料');
+        closeBackupMenu();
+      } catch(err) {
+        toast('❌ 還原失敗：' + err.message);
+      }
+    };
+    input.click();
+  }
+
+  /* ── 備份選單 ── */
+  function openBackupMenu() {
+    const el = document.getElementById('backupMenuOverlay');
+    el.style.display = 'flex';
+  }
+  function closeBackupMenu() {
+    document.getElementById('backupMenuOverlay').style.display = 'none';
   }
 
   /* ── Month Picker ── */
