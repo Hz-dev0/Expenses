@@ -197,7 +197,7 @@
       font-size: 17px;
       flex-shrink: 0;
     }
-    .ri-info  { flex: 1; min-width: 0; }
+    .ri-info  { flex: 1; min-width: 0; -webkit-user-select: none; user-select: none; cursor: pointer; }
     .ri-note  { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ri-cat   { font-size: 10px; color: var(--muted); margin-top: 1px; }
     .ri-amt   { font-family: "Montserrat", sans-serif; font-size: 15px; font-weight: 800; white-space: nowrap; cursor: pointer; }
@@ -1548,25 +1548,26 @@
     let startX = 0, startY = 0;
 
     document.addEventListener('touchstart', e => {
-      const ri = e.target.closest('.ri');
-      if (!ri) return;
-      // 只排除真正的按鈕（刪除鍵）
-      if (e.target.closest('button')) return;
+      // 只針對 ri-info（中間文字區，沒有 onclick，不衝突）
+      const riInfo = e.target.closest('.ri-info');
+      if (!riInfo) return;
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       timer = setTimeout(() => {
         timer = null;
         listFilterUnlinked = !listFilterUnlinked;
+        // 震動回饋（部分 Android 支援）
+        if (navigator.vibrate) navigator.vibrate(40);
         render();
-        toast(listFilterUnlinked ? '🔍 顯示未關聯項目' : '顯示全部項目');
-      }, 550);
+        toast(listFilterUnlinked ? '🔍 只顯示未關聯項目' : '顯示全部項目');
+      }, 500);
     }, { passive: true });
 
     document.addEventListener('touchmove', e => {
       if (!timer) return;
       const dx = e.touches[0].clientX - startX;
       const dy = e.touches[0].clientY - startY;
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
         clearTimeout(timer);
         timer = null;
       }
