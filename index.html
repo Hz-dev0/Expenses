@@ -111,17 +111,6 @@
       40%  { transform: scale(1.08); }
       100% { transform: scale(1); }
     }
-    #budgetHint {
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: .5px;
-      color: var(--muted);
-      text-align: right;
-      margin-top: 1px;
-      opacity: .6;
-      line-height: 1;
-    }
-    #budgetHint.over { color: var(--danger); opacity: .85; }
 
     /* ── TABS ── */
     #tabs {
@@ -533,33 +522,6 @@
     #renameCancelBtn:active { background: rgba(220,170,170,0.28); }
     #renameOkBtn:active     { background: var(--accent); }
 
-    #totalModeTip {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      display: flex;
-      justify-content: center;
-      pointer-events: none;
-      z-index: 150;
-    }
-    #totalModeTip span {
-      background: rgba(140,111,111,0.82);
-      color: #fff;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .8px;
-      padding: 5px 14px;
-      border-radius: 0 0 12px 12px;
-      opacity: 0;
-      transform: translateY(-100%);
-      transition: opacity .2s, transform .2s;
-      white-space: nowrap;
-    }
-    #totalModeTip span.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
 
     /* ── Toast ── */
     #toast {
@@ -580,55 +542,6 @@
       z-index: 200;
     }
     /* ── Budget Modal ── */
-    #budgetOverlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(74,58,58,0.45);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      z-index: 300;
-      align-items: center;
-      justify-content: center;
-    }
-    #budgetOverlay.open { display: flex; }
-
-    #budgetBox {
-      background: var(--card);
-      border-radius: 20px;
-      padding: 24px 22px 18px;
-      width: min(300px, calc(100vw - 40px));
-      box-shadow: 0 8px 40px rgba(200,140,140,0.28);
-      animation: popIn .18s ease;
-    }
-
-    #budgetTitle {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--muted);
-      letter-spacing: 1px;
-      margin-bottom: 6px;
-      text-align: center;
-    }
-
-    #budgetInput {
-      width: 100%;
-      border: 1.5px solid var(--bdr);
-      border-radius: 50px;
-      padding: 9px 16px;
-      font-family: "Montserrat", sans-serif;
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text);
-      outline: none;
-      text-align: center;
-      background: var(--bg1);
-      -webkit-user-select: auto;
-      user-select: auto;
-    }
-    #budgetInput:focus { border-color: var(--rose); }
-    #budgetInput::-webkit-inner-spin-button,
-    #budgetInput::-webkit-outer-spin-button { -webkit-appearance: none; }
 
     /* ── Month Picker Modal ── */
     #monthPickerOverlay {
@@ -1021,14 +934,11 @@
       <button class="mb" id="btnNextM">›</button>
     </div>
   </div>
-  <div style="text-align:right;cursor:pointer" onclick="toggleTotalMode()">
+  <div style="text-align:right">
     <div id="totalAmt"><span class="cur">NT$</span><span id="tNum">0</span></div>
-    <div id="budgetHint"></div>
   </div>
 </div>
 
-<!-- TOTAL MODE TIP -->
-<div id="totalModeTip"></div>
 
 <!-- TABS -->
 <div id="tabs">
@@ -1112,18 +1022,6 @@
   </div>
 </div>
 
-<!-- BUDGET MODAL -->
-<div id="budgetOverlay">
-  <div id="budgetBox">
-    <div id="budgetTitle">設定月支出上限</div>
-    <div style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:12px;letter-spacing:.3px">設為 0 則取消上限</div>
-    <input id="budgetInput" type="number" min="0" max="999999" placeholder="例如 5000" autocomplete="off">
-    <div class="rename-btns">
-      <button id="budgetCancelBtn">取消</button>
-      <button id="budgetOkBtn">確認</button>
-    </div>
-  </div>
-</div>
 
 <!-- EMOJI PICKER MODAL -->
 <div id="emojiOverlay">
@@ -1188,8 +1086,6 @@
   const CAT_C  = ['#e8b8b8', '#b8d4e8', '#b8e8cc', '#e8ddb8'];
   const SK      = 'kakeibo_v2';
   const SK_LBL  = 'kakeibo_labels';
-  const SK_BDG  = 'kakeibo_budget';
-  const SK_MODE = 'kakeibo_budget_mode';
   const IDB_NAME = 'kakeibo_db';
   const IDB_VER  = 1;
   const IDB_STORE = 'data';
@@ -1245,11 +1141,7 @@
     idbSet(SK_LBL, v);
     try { localStorage.setItem(SK_LBL, v); } catch(e) {}
   };
-  const saveBdg = () => {
-    const v = String(budget);
-    idbSet(SK_BDG, v);
-    try { localStorage.setItem(SK_BDG, v); } catch(e) {}
-  };
+
   /* ── 讀取（優先 IDB，fallback localStorage，雙向補齊）── */
   async function loadAll() {
     // recs
@@ -1278,15 +1170,7 @@
         if (!idbVal && lsVal) { idbSet(SK_LBL, lsVal); }
       }
     } catch(e) {}
-    // budget
-    try {
-      const idbVal = await idbGet(SK_BDG);
-      const lsVal  = localStorage.getItem(SK_BDG);
-      const v = idbVal ?? lsVal;
-      if (v !== null && v !== undefined) budget = parseInt(v, 10) || 0;
-      if (idbVal && !lsVal) { try { localStorage.setItem(SK_BDG, idbVal); } catch(e) {} }
-      if (!idbVal && lsVal) { idbSet(SK_BDG, lsVal); }
-    } catch(e) {}
+
     // icons
     try {
       const idbVal = await idbGet(SK_ICONS);
@@ -1299,15 +1183,7 @@
         if (!idbVal && lsVal) { idbSet(SK_ICONS, lsVal); }
       }
     } catch(e) {}
-    // budget mode
-    try {
-      const idbVal = await idbGet(SK_MODE);
-      const lsVal  = localStorage.getItem(SK_MODE);
-      const v = idbVal ?? lsVal;
-      if (v !== null && v !== undefined) showBudgetTotal = (v === '1');
-      if (idbVal && !lsVal) { try { localStorage.setItem(SK_MODE, idbVal); } catch(e) {} }
-      if (!idbVal && lsVal) { idbSet(SK_MODE, lsVal); }
-    } catch(e) {}
+
     // bdgPlan
     try {
       const idbVal = await idbGet(SK_BDGPLAN);
@@ -1338,8 +1214,6 @@
   let collapsed    = {};
   let CATS         = {};
   let renameTarget = null;
-  let budget       = 0;
-  let showBudgetTotal = false;
   let _nextId = Date.now(); // 自增 id，避免同毫秒碰撞
 
   const getCustomLabels = () => {
@@ -1592,11 +1466,10 @@
 
   /* ── 預算規劃渲染 ── */
   function getBdgSpending() {
-    // 本月各 catKey + subId 支出加總
     const mrs = getMrs();
     const out = {};
     mrs.forEach(r => {
-      if (!r.bdgRef) return;
+      if (!r.bdgRef || r.exempt) return; // 排除 exempt
       const ck = r.bdgRef.catKey;
       out[ck] = (out[ck] || 0) + r.amt;
       if (r.bdgRef.subId !== undefined) {
@@ -1852,49 +1725,6 @@
     closeTreePicker();
   }
 
-  /* ── 切換總額顯示模式 ── */
-  const saveMode = () => {
-    const v = showBudgetTotal ? '1' : '0';
-    idbSet(SK_MODE, v);
-    try { localStorage.setItem(SK_MODE, v); } catch(e) {}
-  };
-  let totalModeTipTimer = null;
-  function toggleTotalMode() {
-    showBudgetTotal = !showBudgetTotal;
-    saveMode();
-    render();
-    // 浮動提示
-    const tip = document.getElementById('totalModeTip');
-    if (!tip.querySelector('span')) tip.innerHTML = '<span></span>';
-    const s = tip.querySelector('span');
-    s.textContent = showBudgetTotal ? '顯示：預算內' : '顯示：全部';
-    s.classList.add('show');
-    clearTimeout(totalModeTipTimer);
-    totalModeTipTimer = setTimeout(() => s.classList.remove('show'), 1000);
-  }
-
-  /* ── 花費上限 Modal ── */
-  function openBudget() {
-    const el = document.getElementById('budgetInput');
-    el.value = budget > 0 ? budget : '';
-    document.getElementById('budgetOverlay').classList.add('open');
-    setTimeout(() => { el.focus(); el.select(); }, 120);
-  }
-
-  function closeBudget() {
-    document.getElementById('budgetOverlay').classList.remove('open');
-    document.getElementById('budgetInput').blur();
-  }
-
-  function confirmBudget() {
-    const v = parseInt(document.getElementById('budgetInput').value, 10);
-    budget = (isNaN(v) || v <= 0) ? 0 : Math.min(v, 999999);
-    saveBdg();
-    closeBudget();
-    render();
-    toast(budget > 0 ? '上限設為 NT$' + budget.toLocaleString() : '已取消上限');
-  }
-
   /* ── 更新日期標籤顯示 ── */
   function updateDateLbl() {
     const v = document.getElementById('dateInp').value;
@@ -1979,24 +1809,6 @@
     });
     document.getElementById('mLabel').onclick = openMonthPicker;
 
-    // 花費上限 — 右鍵或長按總金額區
-    document.getElementById('totalAmt').addEventListener('contextmenu', e => { e.preventDefault(); openBudget(); });
-    let budgetPressTimer = null;
-    document.getElementById('totalAmt').addEventListener('touchstart', e => {
-      budgetPressTimer = setTimeout(() => { e.stopPropagation(); openBudget(); }, 600);
-    }, { passive: true });
-    document.getElementById('totalAmt').addEventListener('touchend',  () => clearTimeout(budgetPressTimer), { passive: true });
-    document.getElementById('totalAmt').addEventListener('touchmove', () => clearTimeout(budgetPressTimer), { passive: true });
-
-    document.getElementById('budgetCancelBtn').onclick = closeBudget;
-    document.getElementById('budgetOkBtn').onclick     = confirmBudget;
-    document.getElementById('budgetInput').addEventListener('keydown', e => {
-      if (e.key === 'Enter') confirmBudget();
-      if (e.key === 'Escape') closeBudget();
-    });
-    document.getElementById('budgetOverlay').addEventListener('click', e => {
-      if (e.target === document.getElementById('budgetOverlay')) closeBudget();
-    });
 
     setupSwipe();
     setupMonthSwipe();
@@ -2182,33 +1994,10 @@
     document.getElementById('mLabel').textContent = vy + '．' + mn[vm];
     const mrs   = getMrs();
     const total = mrs.reduce((s, r) => s + r.amt, 0);
-    const budgetTotal = mrs.reduce((s, r) => s + (r.exempt ? 0 : r.amt), 0);
 
-    const tEl   = document.getElementById('totalAmt');
     const tNum  = document.getElementById('tNum');
-    const hint  = document.getElementById('budgetHint');
-
-    const displayTotal = showBudgetTotal ? budgetTotal : total;
-
-    // 預算超出判斷（永遠以 budgetTotal 為準）
-    if (budget > 0 && budgetTotal > budget) {
-      const diff = budgetTotal - budget;
-      tNum.textContent = showBudgetTotal ? ('-' + diff.toLocaleString()) : total.toLocaleString();
-      tEl.classList.toggle('over', showBudgetTotal);
-      hint.textContent = showBudgetTotal ? '超出上限 NT$' + budget.toLocaleString() : '⚠ 預算內已超出';
-      hint.className = 'over';
-    } else {
-      tNum.textContent = displayTotal.toLocaleString();
-      tEl.classList.remove('over');
-      if (budget > 0) {
-        const rem = budget - budgetTotal;
-        hint.textContent = '上限 NT$' + budget.toLocaleString() + '　剩 ' + rem.toLocaleString();
-        hint.className = '';
-      } else {
-        hint.textContent = '';
-        hint.className = '';
-      }
-    }
+    tNum.textContent = total.toLocaleString();
+    document.getElementById('totalAmt').classList.remove('over');
 
     // ensure correct panel visible
     const wrap = document.getElementById('panelWrap');
@@ -2217,9 +2006,8 @@
       else if (ctab === 'ana') wrap.style.transform = 'translateX(-33.333%)';
       else                     wrap.style.transform = 'translateX(-66.666%)';
     }
-    const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
-    renderList(displayMrs, mrs);
-    renderAna(displayMrs, displayTotal);
+    renderList(mrs, mrs);
+    renderAna(mrs, total);
     renderBdgPlan();
   }
 
@@ -2391,7 +2179,7 @@
   function toggleAnaCard(k) {
     anaOpen[k] = !anaOpen[k];
     const mrs = getMrs();
-    const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
+    const displayMrs = mrs;
     const displayTotal = displayMrs.reduce((s, r) => s + r.amt, 0);
     renderAna(displayMrs, displayTotal);
   }
@@ -2437,7 +2225,6 @@
       recs,
       bdgPlan,
       labels: (() => { try { return JSON.parse(localStorage.getItem(SK_LBL) || '{}'); } catch(e) { return {}; } })(),
-      budget: (() => { try { return JSON.parse(localStorage.getItem(SK_BDG) || 'null'); } catch(e) { return null; } })(),
     };
     const json = JSON.stringify(payload);
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
@@ -2589,7 +2376,7 @@
 
     top.addEventListener('touchstart', e => {
       // 不在 totalAmt 區塊才允許月份滑動
-      blocked = !!e.target.closest('#totalAmt, [onclick="toggleTotalMode()"]');
+      blocked = false;
       sx = e.touches[0].clientX;
       moved = false;
     }, { passive: true });
@@ -2609,13 +2396,13 @@
   // PWA 生命週期：切換 App 或回桌面時強制寫入，防止 iOS 背景砍掉導致資料遺失
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      save(); saveLbl(); saveBdg(); saveMode(); saveBdgPlan();
+      save(); saveLbl(); saveBdgPlan();
     }
   });
 
   // 關閉分頁前最後寫入（補強 visibilitychange）
   window.addEventListener('beforeunload', () => {
-    save(); saveLbl(); saveBdg(); saveMode(); saveBdgPlan();
+    save(); saveLbl(); saveBdgPlan();
   });
 
   init();
