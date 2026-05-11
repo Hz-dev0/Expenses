@@ -111,6 +111,44 @@
       40%  { transform: scale(1.08); }
       100% { transform: scale(1); }
     }
+    #budgetHint {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .5px;
+      color: var(--muted);
+      text-align: right;
+      margin-top: 1px;
+      opacity: .6;
+      line-height: 1;
+      min-height: 12px;
+    }
+    #totalModeTip {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 150;
+    }
+    #totalModeTip span {
+      background: rgba(140,111,111,0.82);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      padding: 5px 14px;
+      border-radius: 0 0 12px 12px;
+      opacity: 0;
+      transform: translateY(-100%);
+      transition: opacity .2s, transform .2s;
+      white-space: nowrap;
+    }
+    #totalModeTip span.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
 
     /* ── TABS ── */
     #tabs {
@@ -543,6 +581,54 @@
     }
     /* ── Budget Modal ── */
 
+    /* ── Budget Modal ── */
+    #budgetOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(74,58,58,0.45);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 300;
+      align-items: center;
+      justify-content: center;
+    }
+    #budgetOverlay.open { display: flex; }
+    #budgetBox {
+      background: var(--card);
+      border-radius: 20px;
+      padding: 24px 22px 18px;
+      width: min(300px, calc(100vw - 40px));
+      box-shadow: 0 8px 40px rgba(200,140,140,0.28);
+      animation: popIn .18s ease;
+    }
+    #budgetTitle {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    #budgetInput {
+      width: 100%;
+      border: 1.5px solid var(--bdr);
+      border-radius: 50px;
+      padding: 9px 16px;
+      font-family: "Montserrat", sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      outline: none;
+      text-align: center;
+      background: var(--bg1);
+      -webkit-user-select: auto;
+      user-select: auto;
+    }
+    #budgetInput:focus { border-color: var(--rose); }
+    #budgetInput::-webkit-inner-spin-button,
+    #budgetInput::-webkit-outer-spin-button { -webkit-appearance: none; }
+
     /* ── Month Picker Modal ── */
     #monthPickerOverlay {
       display: none;
@@ -934,10 +1020,14 @@
       <button class="mb" id="btnNextM">›</button>
     </div>
   </div>
-  <div style="text-align:right">
+  <div style="text-align:right;cursor:pointer" onclick="toggleTotalDisplay()">
     <div id="totalAmt"><span class="cur">NT$</span><span id="tNum">0</span></div>
+    <div id="budgetHint"></div>
   </div>
 </div>
+
+<!-- TOTAL MODE TIP -->
+<div id="totalModeTip"></div>
 
 
 <!-- TABS -->
@@ -1032,6 +1122,19 @@
   </div>
 </div>
 
+<!-- BUDGET MODAL -->
+<div id="budgetOverlay">
+  <div id="budgetBox">
+    <div id="budgetTitle">設定月支出上限</div>
+    <div style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:12px;letter-spacing:.3px">設為 0 則取消上限</div>
+    <input id="budgetInput" type="number" min="0" max="999999" placeholder="例如 5000" autocomplete="off">
+    <div class="rename-btns">
+      <button id="budgetCancelBtn">取消</button>
+      <button id="budgetOkBtn">確認</button>
+    </div>
+  </div>
+</div>
+
 <!-- BACKUP MENU -->
 <div id="backupMenuOverlay" style="display:none;position:fixed;inset:0;background:rgba(74,58,58,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:400;align-items:flex-end;justify-content:center">
   <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
@@ -1086,6 +1189,8 @@
   const CAT_C  = ['#e8b8b8', '#b8d4e8', '#b8e8cc', '#e8ddb8'];
   const SK      = 'kakeibo_v2';
   const SK_LBL  = 'kakeibo_labels';
+  const SK_BDG  = 'kakeibo_budget';
+  const SK_MODE = 'kakeibo_budget_mode';
   const IDB_NAME = 'kakeibo_db';
   const IDB_VER  = 1;
   const IDB_STORE = 'data';
@@ -1140,6 +1245,16 @@
     const v = JSON.stringify(getCustomLabels());
     idbSet(SK_LBL, v);
     try { localStorage.setItem(SK_LBL, v); } catch(e) {}
+  };
+  const saveBdg = () => {
+    const v = String(budget);
+    idbSet(SK_BDG, v);
+    try { localStorage.setItem(SK_BDG, v); } catch(e) {}
+  };
+  const saveMode = () => {
+    const v = showBudgetTotal ? '1' : '0';
+    idbSet(SK_MODE, v);
+    try { localStorage.setItem(SK_MODE, v); } catch(e) {}
   };
 
   /* ── 讀取（優先 IDB，fallback localStorage，雙向補齊）── */
@@ -1201,6 +1316,22 @@
         if (!idbVal && lsVal) { idbSet(SK_BDGPLAN, lsVal); }
       }
     } catch(e) {}
+
+    // budget
+    try {
+      const idbVal = await idbGet(SK_BDG);
+      const lsVal  = localStorage.getItem(SK_BDG);
+      const v = idbVal !== null && idbVal !== undefined ? idbVal : lsVal;
+      if (v !== null && v !== undefined) budget = parseInt(v, 10) || 0;
+    } catch(e) {}
+
+    // budget mode
+    try {
+      const idbVal = await idbGet(SK_MODE);
+      const lsVal  = localStorage.getItem(SK_MODE);
+      const v = idbVal !== null && idbVal !== undefined ? idbVal : lsVal;
+      if (v !== null && v !== undefined) showBudgetTotal = (v === '1');
+    } catch(e) {}
   }
 
   // 保留 localStorage 同步備援（供 idbGet fallback 內部使用）
@@ -1214,6 +1345,8 @@
   let collapsed    = {};
   let CATS         = {};
   let renameTarget = null;
+  let budget       = 0;
+  let showBudgetTotal = false;
   let _nextId = Date.now(); // 自增 id，避免同毫秒碰撞
 
   const getCustomLabels = () => {
@@ -1810,6 +1943,20 @@
     document.getElementById('mLabel').onclick = openMonthPicker;
 
 
+    // budget modal
+    document.getElementById('budgetCancelBtn').onclick = closeBudget;
+    document.getElementById('budgetOkBtn').onclick     = confirmBudget;
+    document.getElementById('budgetInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') confirmBudget();
+      if (e.key === 'Escape') closeBudget();
+    });
+    document.getElementById('budgetOverlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('budgetOverlay')) closeBudget();
+    });
+
+    // 長按右上角金額 → 設定上限
+    setupTotalLongPress();
+
     setupSwipe();
     setupMonthSwipe();
 
@@ -1937,6 +2084,50 @@
     toast(r.exempt ? '已從預算中排除' : '已計入預算');
   }
 
+  /* ── 支出上限 Modal ── */
+  function openBudget() {
+    const el = document.getElementById('budgetInput');
+    el.value = budget > 0 ? budget : '';
+    document.getElementById('budgetOverlay').classList.add('open');
+    setTimeout(() => { el.focus(); el.select(); }, 120);
+  }
+
+  function closeBudget() {
+    document.getElementById('budgetOverlay').classList.remove('open');
+    document.getElementById('budgetInput').blur();
+  }
+
+  function confirmBudget() {
+    const v = parseInt(document.getElementById('budgetInput').value, 10);
+    budget = (isNaN(v) || v <= 0) ? 0 : Math.min(v, 999999);
+    saveBdg();
+    closeBudget();
+    render();
+    toast(budget > 0 ? '上限設為 NT$' + budget.toLocaleString() : '已取消上限');
+  }
+
+  /* ── 長按右上角金額 → 設定上限 ── */
+  function setupTotalLongPress() {
+    const el = document.querySelector('[onclick="toggleTotalDisplay()"]');
+    if (!el) return;
+    let timer = null;
+
+    el.addEventListener('touchstart', () => {
+      timer = setTimeout(() => {
+        timer = null;
+        if (navigator.vibrate) navigator.vibrate(40);
+        openBudget();
+      }, 500);
+    }, { passive: true });
+
+    el.addEventListener('touchend', () => { clearTimeout(timer); timer = null; }, { passive: true });
+    el.addEventListener('touchcancel', () => { clearTimeout(timer); timer = null; }, { passive: true });
+    el.addEventListener('touchmove', () => { clearTimeout(timer); timer = null; }, { passive: true });
+
+    // 桌機：右鍵開設定
+    el.addEventListener('contextmenu', e => { e.preventDefault(); openBudget(); });
+  }
+
   /* ── 刪除記帳 ── */
   function delRec(id) {
     recs = recs.filter(r => r.id !== id);
@@ -1988,16 +2179,54 @@
     return recs.filter(r => r.date.startsWith(p));
   }
 
+  /* ── 切換總額顯示模式 ── */
+  let totalModeTipTimer = null;
+  function toggleTotalDisplay() {
+    showBudgetTotal = !showBudgetTotal;
+    saveMode();
+    render();
+    const tip = document.getElementById('totalModeTip');
+    if (!tip.querySelector('span')) tip.innerHTML = '<span></span>';
+    const s = tip.querySelector('span');
+    s.textContent = showBudgetTotal ? '顯示：預算內' : '顯示：全部';
+    s.classList.add('show');
+    clearTimeout(totalModeTipTimer);
+    totalModeTipTimer = setTimeout(() => s.classList.remove('show'), 1000);
+  }
+
   /* ── 主渲染 ── */
   function render() {
     const mn = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
     document.getElementById('mLabel').textContent = vy + '．' + mn[vm];
     const mrs   = getMrs();
     const total = mrs.reduce((s, r) => s + r.amt, 0);
+    const budgetTotal = mrs.reduce((s, r) => s + (r.exempt ? 0 : r.amt), 0);
 
+    const tEl   = document.getElementById('totalAmt');
     const tNum  = document.getElementById('tNum');
-    tNum.textContent = total.toLocaleString();
-    document.getElementById('totalAmt').classList.remove('over');
+    const hint  = document.getElementById('budgetHint');
+
+    const displayTotal = showBudgetTotal ? budgetTotal : total;
+
+    // 預算超出判斷（永遠以 budgetTotal 為準）
+    if (budget > 0 && budgetTotal > budget) {
+      const diff = budgetTotal - budget;
+      tNum.textContent = showBudgetTotal ? ('-' + diff.toLocaleString()) : total.toLocaleString();
+      tEl.classList.toggle('over', showBudgetTotal);
+      hint.textContent = showBudgetTotal ? '超出上限 NT$' + budget.toLocaleString() : '⚠ 預算內已超出';
+      hint.className = 'over';
+    } else {
+      tNum.textContent = displayTotal.toLocaleString();
+      tEl.classList.remove('over');
+      if (budget > 0) {
+        const rem = budget - budgetTotal;
+        hint.textContent = '上限 NT$' + budget.toLocaleString() + '　剩 ' + rem.toLocaleString();
+        hint.className = '';
+      } else {
+        hint.textContent = '';
+        hint.className = '';
+      }
+    }
 
     // ensure correct panel visible
     const wrap = document.getElementById('panelWrap');
@@ -2006,8 +2235,8 @@
       else if (ctab === 'ana') wrap.style.transform = 'translateX(-33.333%)';
       else                     wrap.style.transform = 'translateX(-66.666%)';
     }
-    renderList(mrs, mrs);
-    renderAna(mrs, total);
+    renderList(showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs, mrs);
+    renderAna(showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs, displayTotal);
     renderBdgPlan();
   }
 
