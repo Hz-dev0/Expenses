@@ -2646,29 +2646,32 @@
     };
 
     grid.addEventListener('touchstart', e => {
+      console.log('touchstart fired');
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       e.preventDefault();
-      btn.classList.add('pressed');
-      setTimeout(() => btn.classList.remove('pressed'), 90);
-      if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
-      else if (btn.dataset.del !== undefined) startDel();
-      else if (btn.dataset.ok  !== undefined) addRec();
     }, { passive: false });
 
-    grid.addEventListener('touchend',    e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
-    grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
-
-    // 桌機 mousedown fallback（數字鍵）
     grid.addEventListener('mousedown', e => {
+      console.log('mousedown fired');
+    });
+
+    grid.addEventListener('click', e => {
+      console.log('click fired');
+    });
+
+    grid.addEventListener('pointerdown', e => {
+      console.log('pointerdown fired, pointerType:', e.pointerType, 'isPrimary:', e.isPrimary);
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
-      if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
+      if (!e.isPrimary) { console.log('ignored non-primary'); return; }
+      if (btn.dataset.n !== undefined) ni(btn.dataset.n);
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     });
-    grid.addEventListener('mouseup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('mouseleave', e => { if (delInterval || delTimeout) stopDel(); });
+    grid.addEventListener('pointerup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointercancel',e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('mouseleave',   e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
     document.getElementById('renameCancelBtn').onclick = closeRename;
@@ -2687,7 +2690,7 @@
 
   /* ── 數字輸入 ── */
   function ni(v) {
-    console.log('ni called:', v, new Error().stack.split('\n').slice(1,4).join(' | '));
+    console.log('ni called:', v, '| pointerType of last event stored below');
     if (inp.length >= 6) return;
     if (v === '0' && inp === '') return;
     inp += v;
