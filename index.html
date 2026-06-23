@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -2646,30 +2645,26 @@
       delTimeout = delInterval = null;
     };
 
-    grid.addEventListener('touchstart', e => {
+    // pressed 視覺效果（pointerdown/up 處理輸入，這裡只管樣式）
+    grid.addEventListener('pointerdown', e => {
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
-      if (!btn) return;
-      e.preventDefault();
-      btn.classList.add('pressed');
-      setTimeout(() => btn.classList.remove('pressed'), 90);
-      if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
-      else if (btn.dataset.del !== undefined) startDel();
-      else if (btn.dataset.ok  !== undefined) addRec();
-    }, { passive: false });
+      if (btn) { btn.classList.add('pressed'); setTimeout(() => btn.classList.remove('pressed'), 90); }
+    });
 
-    grid.addEventListener('touchend',    e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
-    grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
-
-    // 桌機 mousedown fallback（數字鍵）
-    grid.addEventListener('mousedown', e => {
+    // 桌機 mousedown fallback（數字鍵）- 用 pointerdown 統一處理，避免 touch+mouse 重複觸發
+    let kbPointerActive = false;
+    grid.addEventListener('pointerdown', e => {
+      if (kbPointerActive) return;
+      kbPointerActive = true;
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     });
-    grid.addEventListener('mouseup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('mouseleave', e => { if (delInterval || delTimeout) stopDel(); });
+    grid.addEventListener('pointerup',     e => { kbPointerActive = false; if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointercancel', e => { kbPointerActive = false; if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('mouseleave',    e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
     document.getElementById('renameCancelBtn').onclick = closeRename;
