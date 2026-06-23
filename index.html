@@ -2658,22 +2658,23 @@
 
     grid.addEventListener('touchend', e => {
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
-      if (btn) e.preventDefault();
+      if (btn) e.preventDefault(); // 阻止合成 click
       if (e.target.closest('[data-del]')) stopDel();
     }, { passive: false });
     grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
 
-    // 桌機 mousedown fallback（數字鍵）
-    let kbUsingTouch = false;
-    grid.addEventListener('touchstart', () => { kbUsingTouch = true; }, { passive: true });
+    // 桌機 mousedown fallback（觸控時跳過，click 一律阻止防止重複）
+    let kbDidTouch = false;
+    grid.addEventListener('touchstart', () => { kbDidTouch = true; }, { passive: true });
     grid.addEventListener('mousedown', e => {
-      if (kbUsingTouch) { kbUsingTouch = false; return; }
+      if (kbDidTouch) { kbDidTouch = false; return; }
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     });
+    grid.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); }); // 阻止 button click 重複觸發
     grid.addEventListener('mouseup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
     grid.addEventListener('mouseleave', e => { if (delInterval || delTimeout) stopDel(); });
 
