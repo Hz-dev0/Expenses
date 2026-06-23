@@ -1577,7 +1577,7 @@
       const c = CATS[k];
       const isOn = k === cat;
       const isUnsplit = k === UNSPLIT_KEY;
-      return `<button class="cbt${isOn ? ' on' : ''}${isUnsplit ? ' cbt-unsplit' : ''}" data-c="${k}" id="cbt-${k}">${c.icon}</button>`;
+      return `<button class="cbt${isOn ? ' on' : ''}${isUnsplit ? ' cbt-unsplit' : ''}" data-c="${k}" id="cbt-${k}">${isUnsplit ? '' : c.icon}</button>`;
     }).join('') + `<button class="kb-catcol-addbtn" id="kbCatAddBtn" title="新增分類">＋</button>`;
     const addBtn = document.getElementById('kbCatAddBtn');
     if (addBtn) addBtn.onclick = () => { addNewCategory(); };
@@ -1713,78 +1713,87 @@
   /* ── 長按偵測（touchstart / mousedown） ── */
   function setupLongPress() {
     const grid = document.getElementById('kbGrid');
-    let pressTimer    = null;
-    let pressedBtn    = null;
+    let pressTimer     = null;
+    let pressedBtn     = null;
     let longPressFired = false;
+    let usingTouch     = false; // 偵測到 touch 事件後，忽略後續合成的 mouse 事件，避免重複觸發
     let startX = 0, startY = 0;
     const MOVE_THRESHOLD = 10; // px
-
-    // Double-tap detection for emoji picker (based on real click events)
-    let lastTapTime = 0;
-    let lastTapKey  = null;
 
     const clearPressTimer = () => {
       clearTimeout(pressTimer);
       pressTimer = null;
     };
 
-    // 長按計時：只用來觸發「編輯分類」，完全不攔截/不影響原生點擊或捲動行為
-    const onPointerDown = (e) => {
-      const btn = e.target.closest('.cbt');
-      if (!btn) return;
+    const endPress = () => {
+      if (pressedBtn) pressedBtn.classList.remove('pressed');
+      pressedBtn = null;
+      clearPressTimer();
+    };
+
+    // 長按 → 開啟「編輯分類」視窗（改名 / 換圖示 / 刪除 都在裡面）
+    const startPress = (btn) => {
       longPressFired = false;
       pressedBtn = btn;
-      const pt = e.touches ? e.touches[0] : e;
-      startX = pt.clientX;
-      startY = pt.clientY;
       btn.classList.add('pressed');
+      clearPressTimer();
       pressTimer = setTimeout(() => {
         longPressFired = true;
-        btn.classList.remove('pressed');
+        if (pressedBtn) pressedBtn.classList.remove('pressed');
         openRename(btn.dataset.c);
       }, 480);
     };
 
-    const onPointerMove = (e) => {
+    const movePress = (clientX, clientY) => {
       if (!pressTimer) return;
-      const pt = e.touches ? e.touches[0] : e;
-      if (Math.abs(pt.clientX - startX) > MOVE_THRESHOLD || Math.abs(pt.clientY - startY) > MOVE_THRESHOLD) {
-        if (pressedBtn) pressedBtn.classList.remove('pressed');
-        clearPressTimer();
+      if (Math.abs(clientX - startX) > MOVE_THRESHOLD || Math.abs(clientY - startY) > MOVE_THRESHOLD) {
+        endPress();
       }
     };
 
-    const onPointerUp = () => {
-      if (pressedBtn) pressedBtn.classList.remove('pressed');
-      clearPressTimer();
-    };
+    // Touch
+    grid.addEventListener('touchstart', e => {
+      const btn = e.target.closest('.cbt');
+      if (!btn) return;
+      usingTouch = true;
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = t.clientY;
+      startPress(btn);
+    }, { passive: true });
 
-    // passive 監聽：完全不呼叫 preventDefault，瀏覽器原生捲動/點擊行為不受影響
-    grid.addEventListener('touchstart', onPointerDown, { passive: true });
-    grid.addEventListener('touchmove',  onPointerMove, { passive: true });
-    grid.addEventListener('touchend',   onPointerUp,   { passive: true });
-    grid.addEventListener('touchcancel', onPointerUp,  { passive: true });
-    grid.addEventListener('mousedown', onPointerDown);
-    grid.addEventListener('mousemove', onPointerMove);
-    grid.addEventListener('mouseup',   onPointerUp);
-    grid.addEventListener('mouseleave', onPointerUp);
+    grid.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      movePress(t.clientX, t.clientY);
+    }, { passive: true });
 
-    // 點擊（分類選取 + 雙擊判斷）— 用原生 click，瀏覽器會自動正確區分「點擊」與「捲動」，不需要自己判斷
+    grid.addEventListener('touchend', endPress, { passive: true });
+    grid.addEventListener('touchcancel', endPress, { passive: true });
+
+    // Mouse（桌機；若裝置剛觸發過 touch，忽略合成滑鼠事件避免重複）
+    grid.addEventListener('mousedown', e => {
+      if (usingTouch) return;
+      const btn = e.target.closest('.cbt');
+      if (!btn) return;
+      startX = e.clientX;
+      startY = e.clientY;
+      startPress(btn);
+    });
+
+    grid.addEventListener('mousemove', e => {
+      if (usingTouch) return;
+      movePress(e.clientX, e.clientY);
+    });
+
+    grid.addEventListener('mouseup', () => { if (!usingTouch) endPress(); });
+    grid.addEventListener('mouseleave', () => { if (!usingTouch) endPress(); });
+
+    // 點擊 → 選取分類。用原生 click 事件，瀏覽器保證會正確區分「點擊」與「捲動／長按」，不需要自己判斷。
     grid.addEventListener('click', e => {
       const btn = e.target.closest('.cbt');
       if (!btn) return;
-      if (longPressFired) { longPressFired = false; return; } // 長按已觸發改名，這次點擊不算選取
-      const key = btn.dataset.c;
-      const now = Date.now();
-      if (now - lastTapTime < 350 && lastTapKey === key) {
-        lastTapTime = 0;
-        lastTapKey = null;
-        if (key !== UNSPLIT_KEY) openEmojiPicker(key);
-        return;
-      }
-      lastTapTime = now;
-      lastTapKey  = key;
-      sc(key);
+      if (longPressFired) { longPressFired = false; return; } // 這次點擊是長按結束觸發的，不當作選取
+      sc(btn.dataset.c);
     });
 
   }
@@ -2419,8 +2428,8 @@
 
   /* ── 選分類 ── */
   function sc(id) {
-    cat = id;
-    document.querySelectorAll('.cbt').forEach(b => b.classList.toggle('on', b.dataset.c === id));
+    cat = (cat === id) ? UNSPLIT_KEY : id; // 再點一次目前選取的分類 = 取消分類，改列為待拆帳
+    document.querySelectorAll('.cbt').forEach(b => b.classList.toggle('on', b.dataset.c === cat));
   }
 
   /* ── 新增記帳 ── */
@@ -2682,6 +2691,11 @@
             : `<span class="ri-bdg-tag ri-unsplit-tag">剩 $${remain.toLocaleString()} 未拆</span>`;
         }
 
+        // 如果已關聯預算分類/子分類，前面不重複顯示分類文字（標籤本身已包含完整資訊），避免「圖示是B、文字卻還是A」的不一致
+        const linkedCat = (!isUnsplit && r.bdgRef && r.bdgRef.catKey && CATS[r.bdgRef.catKey]) ? CATS[r.bdgRef.catKey] : null;
+        const plainLbl = linkedCat ? '' : c.lbl;
+        const noteFallbackLbl = linkedCat ? linkedCat.lbl : c.lbl;
+
         const rowClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
         const iconClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
 
@@ -2692,8 +2706,8 @@
             style="-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer"
             onclick="${rowClick}"
           >
-            <div class="ri-note">${r.note ? esc(r.note) : c.lbl}</div>
-            <div class="ri-cat">${c.lbl}${bdgTag}${unsplitTag}</div>
+            <div class="ri-note">${r.note ? esc(r.note) : noteFallbackLbl}</div>
+            <div class="ri-cat">${plainLbl}${bdgTag}${unsplitTag}</div>
           </div>
           <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="${isUnsplit ? rowClick : `toggleExempt(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊切換是否計入預算'}"><small>$</small>${r.amt.toLocaleString()}</div>
           <button class="ri-del" onclick="delRec(${r.id})">✕</button>
