@@ -1185,9 +1185,10 @@
     .split-cat-btn.sel span.lbl { color: #fff; }
     .split-cat-btn.has-subs { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
     .split-subs-wrap {
-      grid-column: 1 / -1; background: rgba(220,170,170,0.08);
+      background: rgba(220,170,170,0.08);
       border: 1.5px solid var(--rose); border-radius: 12px;
-      padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; margin-top: -2px;
+      padding: 8px; display: flex; flex-wrap: wrap; gap: 6px;
+      margin-top: -4px; margin-bottom: 10px;
     }
     .split-sub-btn {
       flex: 1; min-width: 64px; border: 1.5px solid var(--bdr); border-radius: 10px;
@@ -1529,6 +1530,7 @@
     </div>
     <div class="split-cat-label">分配到哪個分類？</div>
     <div class="split-cat-grid" id="splitCatGrid"></div>
+    <div class="split-subs-wrap" id="splitSubsWrap" style="display:none;margin-bottom:10px;border-radius:12px;"></div>
     <button class="split-confirm-btn" id="splitConfirmBtn" onclick="confirmSplitPortion()">確認拆分這筆</button>
     <button id="splitCancelBtn" onclick="closeSplitModal()">完成 / 關閉</button>
   </div>
@@ -2264,7 +2266,9 @@
     _splitRecId  = recId;
     _splitSelCat = CKEYS[0] || null;
     _splitSelSub = null;
-    _splitExpCat = null;
+    // 若預設選中的分類有子分類，自動展開
+    const _defaultPlan = _splitSelCat ? bdgPlan[_splitSelCat] : null;
+    _splitExpCat = (_defaultPlan && _defaultPlan.subs && _defaultPlan.subs.length > 0) ? _splitSelCat : null;
     document.getElementById('splitSub').textContent =
       (r.note ? r.note + ' · ' : '') + '原始金額 NT$' + r.amt.toLocaleString();
     renderSplitModal();
@@ -2325,21 +2329,28 @@
       const plan = bdgPlan[k];
       const hasSubs = plan && plan.subs && plan.subs.length > 0;
       const isCatSel = k === _splitSelCat;
-      const isExp = k === _splitExpCat;
       gridHTML += `<button type="button" class="split-cat-btn${isCatSel ? ' sel' : ''}${hasSubs ? ' has-subs' : ''}" onclick="selectSplitCat('${k}')">
         <span>${c.icon}</span><span class="lbl">${esc(c.lbl)}${hasSubs ? ' ▾' : ''}</span>
       </button>`;
-      // 若此分類被展開，插入子分類列（跨全欄）
-      if (isExp && hasSubs) {
-        gridHTML += `<div class="split-subs-wrap">`;
-        plan.subs.forEach(s => {
-          const isSub = isCatSel && _splitSelSub === s.id;
-          gridHTML += `<button type="button" class="split-sub-btn${isSub ? ' sel' : ''}" onclick="selectSplitSub('${k}',${s.id})">${esc(s.name)}</button>`;
-        });
-        gridHTML += `</div>`;
-      }
     });
     grid.innerHTML = gridHTML;
+
+    // 子分類區塊（獨立在 grid 之外，避免 grid 欄位問題）
+    const subsWrap = document.getElementById('splitSubsWrap');
+    const expPlan = _splitExpCat ? bdgPlan[_splitExpCat] : null;
+    const expHasSubs = expPlan && expPlan.subs && expPlan.subs.length > 0;
+    if (_splitExpCat && expHasSubs) {
+      let subsHTML = '';
+      expPlan.subs.forEach(s => {
+        const isSub = _splitSelCat === _splitExpCat && _splitSelSub === s.id;
+        subsHTML += `<button type="button" class="split-sub-btn${isSub ? ' sel' : ''}" onclick="selectSplitSub('${_splitExpCat}',${s.id})">${esc(s.name)}</button>`;
+      });
+      subsWrap.innerHTML = subsHTML;
+      subsWrap.style.display = 'flex';
+    } else {
+      subsWrap.innerHTML = '';
+      subsWrap.style.display = 'none';
+    }
 
     const confirmBtn = document.getElementById('splitConfirmBtn');
     confirmBtn.disabled = remain <= 0;
