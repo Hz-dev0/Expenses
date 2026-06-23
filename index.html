@@ -1401,18 +1401,18 @@
   </div>
   <div class="kb-r3" id="kbGrid">
     <div class="kb-numgrid">
-      <div class="nb"      data-n="7">7</div>
-      <div class="nb"      data-n="8">8</div>
-      <div class="nb"      data-n="9">9</div>
-      <div class="nb"  data-n="4">4</div>
-      <div class="nb"  data-n="5">5</div>
-      <div class="nb"  data-n="6">6</div>
-      <div class="nb"  data-n="1">1</div>
-      <div class="nb"  data-n="2">2</div>
-      <div class="nb"  data-n="3">3</div>
-      <div class="nb del" data-del>⌫</div>
-      <div class="nb"     data-n="0">0</div>
-      <div class="nb ok"  data-ok>記帳</div>
+      <button class="nb"      data-n="7">7</button>
+      <button class="nb"      data-n="8">8</button>
+      <button class="nb"      data-n="9">9</button>
+      <button class="nb"  data-n="4">4</button>
+      <button class="nb"  data-n="5">5</button>
+      <button class="nb"  data-n="6">6</button>
+      <button class="nb"  data-n="1">1</button>
+      <button class="nb"  data-n="2">2</button>
+      <button class="nb"  data-n="3">3</button>
+      <button class="nb del" data-del>⌫</button>
+      <button class="nb"     data-n="0">0</button>
+      <button class="nb ok"  data-ok>記帳</button>
     </div>
     <div class="kb-catcol" id="kbCatCol"></div>
   </div>
@@ -2645,22 +2645,21 @@
       delTimeout = delInterval = null;
     };
 
-    // 數字鍵盤輸入：只處理第一個 pointer，避免觸控裝置重複觸發
-    let kbActiveId = null;
+    // 統一用 pointerdown 處理觸控和滑鼠，瀏覽器保證每次點擊只觸發一次
     grid.addEventListener('pointerdown', e => {
-      if (kbActiveId !== null) return; // 已有 pointer 在處理中，忽略
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
-      kbActiveId = e.pointerId;
+      e.preventDefault();
       btn.classList.add('pressed');
       setTimeout(() => btn.classList.remove('pressed'), 90);
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
-    });
-    grid.addEventListener('pointerup',     e => { if (e.pointerId === kbActiveId) kbActiveId = null; if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('pointercancel', e => { if (e.pointerId === kbActiveId) kbActiveId = null; if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('mouseleave',    e => { if (delInterval || delTimeout) stopDel(); });
+    }, { passive: false });
+    grid.addEventListener('pointerup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointercancel',e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('mouseleave',   e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
     document.getElementById('renameCancelBtn').onclick = closeRename;
