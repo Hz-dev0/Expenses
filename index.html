@@ -1420,6 +1420,7 @@
   const SK_CATS = 'kakeibo_cats_list';
   const SK_BDG  = 'kakeibo_budget';
   const SK_MODE = 'kakeibo_budget_mode';
+  const SK_CAT  = 'kakeibo_last_cat';  // 最後使用的分類（不含待拆帳）
   const IDB_NAME = 'kakeibo_db';
   const IDB_VER  = 1;
   const IDB_STORE = 'data';
@@ -2340,6 +2341,11 @@
   async function init() {
     await loadAll();
     rebuildCats();
+    // 還原上次使用的分類（跳過待拆帳）
+    try {
+      const saved = localStorage.getItem(SK_CAT);
+      if (saved && CKEYS.includes(saved)) cat = saved;
+    } catch(e) {}
     if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
     initBdgPlan(); // 確保每個 catKey 都有預算結構
     // 從現有資料的最大 id 繼續，避免重複
@@ -2533,6 +2539,9 @@
   /* ── 選分類 ── */
   function sc(id) {
     cat = (cat === id) ? UNSPLIT_KEY : id; // 再點一次目前選取的分類 = 取消分類，改列為待拆帳
+    if (cat !== UNSPLIT_KEY) {
+      try { localStorage.setItem(SK_CAT, cat); } catch(e) {}
+    }
     document.querySelectorAll('.cbt').forEach(b => b.classList.toggle('on', b.dataset.c === cat));
   }
 
