@@ -1620,12 +1620,10 @@
   function renderCatBtns() {
     const col = document.getElementById('kbCatCol');
     if (!col) return;
-    const allKeys = [...CKEYS, UNSPLIT_KEY];
-    col.innerHTML = allKeys.map(k => {
+    col.innerHTML = CKEYS.map(k => {
       const c = CATS[k];
       const isOn = k === cat;
-      const isUnsplit = k === UNSPLIT_KEY;
-      return `<button class="cbt${isOn ? ' on' : ''}${isUnsplit ? ' cbt-unsplit' : ''}" data-c="${k}" id="cbt-${k}">${isUnsplit ? '' : c.icon}</button>`;
+      return `<button class="cbt${isOn ? ' on' : ''}" data-c="${k}" id="cbt-${k}">${c.icon}</button>`;
     }).join('') + `<button class="kb-catcol-addbtn" id="kbCatAddBtn" title="新增分類">＋</button>`;
     const addBtn = document.getElementById('kbCatAddBtn');
     if (addBtn) addBtn.onclick = () => { addNewCategory(); };
@@ -1985,7 +1983,6 @@
                   onchange="setBdgSubBudget('${k}',${s.id},this.value)"
                   onclick="event.stopPropagation()"
                 ></span>
-                <button class="bdgp-sub-del" onclick="event.stopPropagation();delBdgSub('${k}',${s.id})">✕</button>
               </div>
             </div>
             ${s.budget > 0 ? `<div class="bdgp-sub-bar-bg"><div class="bdgp-sub-bar-fill${sOver?' over':''}" style="width:${spct}%"></div></div>` : ''}
@@ -1999,7 +1996,6 @@
           <span class="bdgp-name">${esc(c.lbl)}</span>
           <span class="bdgp-budget-tag">${plan.budget > 0 ? '預算 $'+plan.budget.toLocaleString() : '未設細分'}</span>
           <span class="bdgp-total${isOver?' over':''}">$${spent.toLocaleString()}</span>
-          <button class="bdgp-cat-del" onclick="event.stopPropagation();deleteCategory('${k}')" title="刪除分類">✕</button>
           <span class="bdgp-arrow">${plan.open ? '▴' : '▾'}</span>
         </div>
         ${plan.budget > 0 ? `<div class="bdgp-bar-wrap"><div class="bdgp-bar-bg"><div class="bdgp-bar-fill${isOver?' over':''}" style="width:${pct}%"></div></div></div>` : ''}
@@ -2018,8 +2014,6 @@
 
     panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px 6px">
       <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1.2px">預算規劃</span>
-      <button onclick="addNewCategory()" title="新增分類"
-        style="width:24px;height:24px;border-radius:50%;border:1.5px solid var(--rose);background:rgba(235,185,185,0.12);color:var(--roseDk);font-size:15px;font-weight:800;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">＋</button>
     </div>${summaryHtml}${itemsHtml}`;
   }
 
