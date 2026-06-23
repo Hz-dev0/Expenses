@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -1401,18 +1402,18 @@
   </div>
   <div class="kb-r3" id="kbGrid">
     <div class="kb-numgrid">
-      <button class="nb"      data-n="7">7</button>
-      <button class="nb"      data-n="8">8</button>
-      <button class="nb"      data-n="9">9</button>
-      <button class="nb"  data-n="4">4</button>
-      <button class="nb"  data-n="5">5</button>
-      <button class="nb"  data-n="6">6</button>
-      <button class="nb"  data-n="1">1</button>
-      <button class="nb"  data-n="2">2</button>
-      <button class="nb"  data-n="3">3</button>
-      <button class="nb del" data-del>⌫</button>
-      <button class="nb"     data-n="0">0</button>
-      <button class="nb ok"  data-ok>記帳</button>
+      <div class="nb"      data-n="7">7</div>
+      <div class="nb"      data-n="8">8</div>
+      <div class="nb"      data-n="9">9</div>
+      <div class="nb"  data-n="4">4</div>
+      <div class="nb"  data-n="5">5</div>
+      <div class="nb"  data-n="6">6</div>
+      <div class="nb"  data-n="1">1</div>
+      <div class="nb"  data-n="2">2</div>
+      <div class="nb"  data-n="3">3</div>
+      <div class="nb del" data-del>⌫</div>
+      <div class="nb"     data-n="0">0</div>
+      <div class="nb ok"  data-ok>記帳</div>
     </div>
     <div class="kb-catcol" id="kbCatCol"></div>
   </div>
@@ -2656,25 +2657,17 @@
       else if (btn.dataset.ok  !== undefined) addRec();
     }, { passive: false });
 
-    grid.addEventListener('touchend', e => {
-      const btn = e.target.closest('[data-n],[data-del],[data-ok]');
-      if (btn) e.preventDefault(); // 阻止合成 click
-      if (e.target.closest('[data-del]')) stopDel();
-    }, { passive: false });
+    grid.addEventListener('touchend',    e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
     grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
 
-    // 桌機 mousedown fallback（觸控時跳過，click 一律阻止防止重複）
-    let kbDidTouch = false;
-    grid.addEventListener('touchstart', () => { kbDidTouch = true; }, { passive: true });
+    // 桌機 mousedown fallback（數字鍵）
     grid.addEventListener('mousedown', e => {
-      if (kbDidTouch) { kbDidTouch = false; return; }
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     });
-    grid.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); }); // 阻止 button click 重複觸發
     grid.addEventListener('mouseup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
     grid.addEventListener('mouseleave', e => { if (delInterval || delTimeout) stopDel(); });
 
