@@ -670,6 +670,34 @@
     #budgetInput::-webkit-inner-spin-button,
     #budgetInput::-webkit-outer-spin-button { -webkit-appearance: none; }
 
+    /* ── Edit Note Modal ── */
+    #editNoteOverlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(74,58,58,0.45); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      z-index: 500; align-items: center; justify-content: center;
+    }
+    #editNoteOverlay.open { display: flex; }
+    #editNoteBox {
+      background: var(--card); border-radius: 20px; padding: 24px 22px 18px;
+      width: min(320px, calc(100vw - 40px));
+      box-shadow: 0 8px 40px rgba(200,140,140,0.28); animation: popIn .18s ease;
+    }
+    #editNoteTitle {
+      font-size: 13px; font-weight: 700; color: var(--muted);
+      letter-spacing: 1px; margin-bottom: 12px; text-align: center;
+    }
+    #editNoteInp {
+      width: 100%; box-sizing: border-box; border: 1.5px solid var(--bdr); border-radius: 50px;
+      padding: 9px 16px; font-family: "Noto Sans TC", sans-serif; font-size: 15px; font-weight: 600;
+      color: var(--text); outline: none; text-align: center; background: var(--bg1);
+      -webkit-user-select: auto; user-select: auto;
+    }
+    #editNoteInp:focus { border-color: var(--rose); }
+    #editNoteCancelBtn { background: rgba(220,170,170,0.15); color: var(--muted); }
+    #editNoteOkBtn     { background: linear-gradient(135deg, #ebb8b8, #d49898); color: #fff; }
+    #editNoteCancelBtn:active { background: rgba(220,170,170,0.28); }
+    #editNoteOkBtn:active     { background: var(--accent); }
+
     /* ── Month Picker Modal ── */
     #monthPickerOverlay {
       display: none;
@@ -1336,9 +1364,6 @@
       <div class="split-remain-label">尚未拆分金額</div>
       <div class="split-remain-num"><small>NT$</small><span id="splitRemainNum">0</span></div>
     </div>
-    <div class="split-existing" id="splitExistingWrap" style="display:none">
-      <div id="splitExistingList"></div>
-    </div>
     <div class="split-input-row">
       <div class="split-input-label">這筆要拆分多少金額？</div>
       <input type="number" inputmode="decimal" class="split-amt-input" id="splitAmtInput" placeholder="留空 = 全部剩餘金額">
@@ -1347,6 +1372,18 @@
     <div class="split-cat-grid" id="splitCatGrid"></div>
     <button class="split-confirm-btn" id="splitConfirmBtn" onclick="confirmSplitPortion()">確認拆分這筆</button>
     <button id="splitCancelBtn" onclick="closeSplitModal()">完成 / 關閉</button>
+  </div>
+</div>
+
+<!-- EDIT NOTE MODAL -->
+<div id="editNoteOverlay">
+  <div id="editNoteBox">
+    <div id="editNoteTitle">編輯備註</div>
+    <input id="editNoteInp" type="text" placeholder="輸入備註（可留空）" autocomplete="off" maxlength="60">
+    <div class="rename-btns">
+      <button id="editNoteCancelBtn">取消</button>
+      <button id="editNoteOkBtn">確認</button>
+    </div>
   </div>
 </div>
 
@@ -1572,9 +1609,8 @@
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   /* ── 待拆帳工具函式 ── */
-  const unsplitSplitSum = r => (r.splits || []).reduce((s, x) => s + x.amt, 0);
-  const unsplitRemaining = r => Math.max(0, Math.round((r.amt - unsplitSplitSum(r)) * 100) / 100);
-  const isUnsplitDone = r => r.cat === UNSPLIT_KEY && unsplitRemaining(r) <= 0;
+  const unsplitRemaining = r => r.amt;  // 拆帳後直接扣減 amt，不再使用 splits 陣列
+  const isUnsplitDone = r => r.cat === UNSPLIT_KEY && r.amt <= 0;
   // 取得目前所有「待拆帳」紀錄中尚未分配完的總金額（跨全部歷史，不限本月）
   const totalUnsplitRemaining = () =>
     recs.filter(r => r.cat === UNSPLIT_KEY)
@@ -2121,28 +2157,7 @@
 
     document.getElementById('splitRemainNum').textContent = remain.toLocaleString();
 
-    // 已拆分清單
-    const wrap = document.getElementById('splitExistingWrap');
-    const list = document.getElementById('splitExistingList');
-    const splits = r.splits || [];
-    if (splits.length > 0) {
-      wrap.style.display = '';
-      list.innerHTML = splits.map(s => {
-        const c = CATS[s.cat] || { icon: '🏷️', lbl: '未分類' };
-        const subName = (s.subId !== undefined && bdgPlan[s.cat])
-          ? (bdgPlan[s.cat].subs.find(x => x.id === s.subId) || {}).name || '' : '';
-        const label = c.lbl + (subName ? ' › ' + subName : '') + (s.note ? ' · ' + esc(s.note) : '');
-        return `<div class="split-existing-row">
-          <span class="split-existing-icon">${c.icon}</span>
-          <span class="split-existing-name">${label}</span>
-          <span class="split-existing-amt">$${s.amt.toLocaleString()}</span>
-          <button class="split-existing-del" onclick="removeSplitPortion(${s.id})" title="移除這筆拆分">✕</button>
-        </div>`;
-      }).join('');
-    } else {
-      wrap.style.display = 'none';
-      list.innerHTML = '';
-    }
+
 
     // 分類選擇格（支援子分類展開）
     if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) _splitSelCat = CKEYS[0] || null;
@@ -2220,38 +2235,37 @@
     let v = parseFloat(inputEl.value);
     if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) { toast('請選擇分類'); return; }
     if (!v || v <= 0) { v = remain; }  // 未輸入金額 → 全部剩餘金額
+    v = Math.round(v * 100) / 100;
     if (v > remain + 0.001) { toast('金額超過剩餘未拆金額'); return; }
 
-    if (!r.splits) r.splits = [];
-    const sid = (r.splits.reduce((m, s) => Math.max(m, s.id), 0) || 0) + 1;
-    const entry = { id: sid, amt: Math.round(v * 100) / 100, cat: _splitSelCat };
-    if (_splitSelSub !== null) entry.subId = _splitSelSub;
-    r.splits.push(entry);
+    // 建立新紀錄（同日期、指定分類）
+    const subName = (_splitSelSub !== null && bdgPlan[_splitSelCat])
+      ? (bdgPlan[_splitSelCat].subs.find(s => s.id === _splitSelSub) || {}).name || '' : '';
+    const catLabel = CATS[_splitSelCat].lbl + (subName ? ' › ' + subName : '');
+    const newRec = { id: _nextId++, date: r.date, cat: _splitSelCat, amt: v, note: r.note || '' };
+    if (_splitSelSub !== null) newRec.bdgRef = { catKey: _splitSelCat, subId: _splitSelSub };
+    recs.push(newRec);
+
+    // 扣減原始待拆帳金額
+    r.amt = Math.round((r.amt - v) * 100) / 100;
+
+    // 若已全部拆完，刪除原始待拆帳紀錄並關閉
+    if (r.amt <= 0) {
+      recs = recs.filter(x => x.id !== r.id);
+      save();
+      toast('🎉 已全部拆分完成！');
+      closeSplitModal();
+      return;
+    }
 
     save();
     inputEl.value = '';
     _splitSelSub = null;
     renderSplitModal();
-
-    const newRemain = unsplitRemaining(r);
-    const subName = (_splitSelSub !== null && bdgPlan[_splitSelCat])
-      ? (bdgPlan[_splitSelCat].subs.find(s => s.id === _splitSelSub) || {}).name || '' : '';
-    const catLabel = CATS[_splitSelCat].lbl + (subName ? ' › ' + subName : '');
-    if (newRemain <= 0) {
-      toast('🎉 已全部拆分完成！');
-    } else {
-      toast('已拆分 $' + v.toLocaleString() + ' 到 ' + catLabel);
-    }
+    toast('已拆分 $' + v.toLocaleString() + ' 到 ' + catLabel);
   }
 
-  function removeSplitPortion(splitId) {
-    const r = recs.find(x => x.id === _splitRecId);
-    if (!r || !r.splits) return;
-    r.splits = r.splits.filter(s => s.id !== splitId);
-    save();
-    renderSplitModal();
-    toast('已移除該筆拆分');
-  }
+
 
   function renderTreeContent(cur) {
     let html = '';
@@ -2419,6 +2433,16 @@
     });
     document.getElementById('budgetOverlay').addEventListener('click', e => {
       if (e.target === document.getElementById('budgetOverlay')) closeBudget();
+    });
+
+    document.getElementById('editNoteCancelBtn').onclick = closeEditNote;
+    document.getElementById('editNoteOkBtn').onclick     = confirmEditNote;
+    document.getElementById('editNoteInp').addEventListener('keydown', e => {
+      if (e.key === 'Enter') confirmEditNote();
+      if (e.key === 'Escape') closeEditNote();
+    });
+    document.getElementById('editNoteOverlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('editNoteOverlay')) closeEditNote();
     });
 
     // 長按右上角金額 → 設定上限
@@ -2596,6 +2620,60 @@
     el.addEventListener('contextmenu', e => { e.preventDefault(); openBudget(); });
   }
 
+  /* ── ri-info 長按 = 編輯備註，短按 = 原有行為 ── */
+  const _lpTimers = new WeakMap();
+  function riLongPressStart(e, el) {
+    const t = setTimeout(() => {
+      _lpTimers.set(el, null);
+      if (navigator.vibrate) navigator.vibrate(40);
+      openEditNote(parseInt(el.dataset.id));
+    }, 480);
+    _lpTimers.set(el, t);
+  }
+  function riLongPressEnd(e, el) {
+    const t = _lpTimers.get(el);
+    if (t) { clearTimeout(t); _lpTimers.set(el, 'tap'); }
+  }
+  function riLongPressCancel(el) {
+    const t = _lpTimers.get(el);
+    if (t && t !== 'tap') clearTimeout(t);
+    _lpTimers.set(el, null);
+  }
+  function riInfoClick(e, el) {
+    const state = _lpTimers.get(el);
+    // 如果是剛完成長按（timer 已被設為 null），不執行短按
+    if (state === null) { _lpTimers.delete(el); return; }
+    eval(el.dataset.tap);
+  }
+
+  /* ── 編輯備註 ── */
+  let _editNoteRecId = null;
+
+  function openEditNote(id) {
+    const r = recs.find(r => r.id === id);
+    if (!r) return;
+    _editNoteRecId = id;
+    const inp = document.getElementById('editNoteInp');
+    inp.value = r.note || '';
+    document.getElementById('editNoteOverlay').classList.add('open');
+    setTimeout(() => { inp.focus(); inp.select(); }, 120);
+  }
+
+  function closeEditNote() {
+    document.getElementById('editNoteOverlay').classList.remove('open');
+    _editNoteRecId = null;
+  }
+
+  function confirmEditNote() {
+    const r = recs.find(r => r.id === _editNoteRecId);
+    if (!r) { closeEditNote(); return; }
+    r.note = document.getElementById('editNoteInp').value.trim();
+    save();
+    render();
+    closeEditNote();
+    toast('備註已更新');
+  }
+
   /* ── 刪除記帳 ── */
   function delRec(id) {
     recs = recs.filter(r => r.id !== id);
@@ -2755,7 +2833,7 @@
         const c = CATS[r.cat] || UNCATEGORIZED;
         const isUnsplit = r.cat === UNSPLIT_KEY;
         const remain = isUnsplit ? unsplitRemaining(r) : 0;
-        const isDone = isUnsplit && remain <= 0 && (r.splits||[]).length > 0;
+        const isDone = isUnsplit && remain <= 0;
 
         // icon 優先顯示已關聯的預算分類 icon
         const displayIcon = (!isUnsplit && r.bdgRef && r.bdgRef.catKey && CATS[r.bdgRef.catKey])
@@ -2788,9 +2866,15 @@
         return `<div class="ri${r.exempt ? ' exempt-row' : ''}${isUnsplit ? ' ri-unsplit' : ''}">
           <div class="ri-ico" style="cursor:pointer" onclick="${iconClick}" title="${isUnsplit ? '點擊拆分' : '點擊關聯預算'}">${displayIcon}</div>
           <div class="ri-info"
-            oncontextmenu="return false"
+            oncontextmenu="openEditNote(${r.id});return false"
             style="-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer"
-            onclick="${rowClick}"
+            data-tap="${rowClick}"
+            data-id="${r.id}"
+            ontouchstart="riLongPressStart(event,this)"
+            ontouchend="riLongPressEnd(event,this)"
+            ontouchcancel="riLongPressCancel(this)"
+            ontouchmove="riLongPressCancel(this)"
+            onclick="riInfoClick(event,this)"
           >
             <div class="ri-note">${r.note ? esc(r.note) : noteFallbackLbl}</div>
             <div class="ri-cat">${plainLbl}${bdgTag}${unsplitTag}</div>
@@ -2826,11 +2910,7 @@
     let uncategorizedTotal = 0;
     mrs.forEach(r => {
       if (r.cat === UNSPLIT_KEY) {
-        // 待拆帳本身不計入一般分類統計；其拆分出去的部分計入對應分類
-        (r.splits || []).forEach(s => {
-          if (CKEYS.includes(s.cat)) tv[s.cat] += s.amt;
-          else uncategorizedTotal += s.amt;
-        });
+        // 待拆帳本身不計入一般分類統計（拆出去的已是獨立紀錄，會由對應分類自行計入）
         unsplitRemain += unsplitRemaining(r);
         return;
       }
