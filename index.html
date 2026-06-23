@@ -1069,6 +1069,7 @@
       padding: 11px 14px; font-family: "Montserrat",sans-serif; font-size: 20px; font-weight: 800;
       color: var(--text); background: var(--bg1); outline: none; text-align: center;
     }
+    .split-amt-input::placeholder { font-size: 13px; font-weight: 600; font-family: "Noto Sans TC",sans-serif; }
     .split-amt-input:focus { border-color: var(--rose); }
     .split-quick-btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
     .split-quick-btn {
@@ -1280,7 +1281,7 @@
   <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
     <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:16px">備份 & 還原</div>
     <button onclick="backupJSON()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
-      <span style="font-size:22px">📥</span>
+      <span style="font-size:22px">✄</span>
       <div>
         <div style="font-size:13px;font-weight:700;color:var(--text)">備份 JSON</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">下載完整備份（含預算設定）到手機</div>
@@ -1317,7 +1318,7 @@
 <!-- SPLIT (待拆帳) MODAL -->
 <div id="splitOverlay">
   <div id="splitBox">
-    <div id="splitTitle">📥 拆分待拆帳</div>
+    <div id="splitTitle">✄ 拆分待拆帳</div>
     <div id="splitSub"></div>
     <div class="split-remain-card">
       <div class="split-remain-label">尚未拆分金額</div>
@@ -1328,8 +1329,7 @@
     </div>
     <div class="split-input-row">
       <div class="split-input-label">這筆要拆分多少金額？</div>
-      <input type="number" inputmode="decimal" class="split-amt-input" id="splitAmtInput" placeholder="0">
-      <div class="split-quick-btns" id="splitQuickBtns"></div>
+      <input type="number" inputmode="decimal" class="split-amt-input" id="splitAmtInput" placeholder="留空 = 全部剩餘金額">
     </div>
     <div class="split-cat-label">分配到哪個分類？</div>
     <div class="split-cat-grid" id="splitCatGrid"></div>
@@ -1352,7 +1352,7 @@
   ];
   // 特殊分類：待拆帳。永遠存在、不可刪除、不計入預算規劃/分析統計。
   const UNSPLIT_KEY = 'unsplit';
-  const UNSPLIT_CAT = { key: UNSPLIT_KEY, icon: '📥', lbl: '待拆帳' };
+  const UNSPLIT_CAT = { key: UNSPLIT_KEY, icon: '✄', lbl: '待拆帳' };
   // 分類被刪除後，舊紀錄的分類顯示用回退物件
   const UNCATEGORIZED = { icon: '🏷️', lbl: '未分類' };
 
@@ -2048,19 +2048,49 @@
   }
 
   /* ── 待拆帳 Modal ── */
-  let _splitRecId  = null;
-  let _splitSelCat = null;
+  let _splitRecId   = null;
+  let _splitSelCat  = null;
+  let _splitSelSub  = null;   // null = 選大分類本身，數字 = subId
+  let _splitExpCat  = null;   // 目前展開細分類的大分類 key
 
   function openSplitModal(recId) {
     const r = recs.find(x => x.id === recId);
     if (!r || r.cat !== UNSPLIT_KEY) return;
     _splitRecId  = recId;
     _splitSelCat = CKEYS[0] || null;
+    _splitSelSub = null;
+    _splitExpCat = null;
     document.getElementById('splitSub').textContent =
       (r.note ? r.note + ' · ' : '') + '原始金額 NT$' + r.amt.toLocaleString();
     renderSplitModal();
     document.getElementById('splitOverlay').classList.add('open');
-    setTimeout(() => document.getElementById('splitAmtInput').focus(), 150);
+    // 調整 box 位置避免鍵盤遮擋
+    _splitAdjustForKeyboard();
+    setTimeout(() => {
+      document.getElementById('splitAmtInput').focus();
+    }, 150);
+  }
+
+  function _splitAdjustForKeyboard() {
+    const box = document.getElementById('splitBox');
+    if (!box) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const adjust = () => {
+      const offsetFromBottom = window.innerHeight - (vv.offsetTop + vv.height);
+      box.style.marginBottom = offsetFromBottom > 0 ? offsetFromBottom + 'px' : '0px';
+    };
+    adjust();
+    vv.addEventListener('resize', adjust);
+    vv.addEventListener('scroll', adjust);
+    // 關閉時清理
+    const cleanup = () => {
+      vv.removeEventListener('resize', adjust);
+      vv.removeEventListener('scroll', adjust);
+      box.style.marginBottom = '0px';
+      document.getElementById('splitOverlay').removeEventListener('split-close', cleanup);
+    };
+    document.getElementById('splitOverlay').addEventListener('split-close', cleanup, { once: true });
   }
 
   function closeSplitModal() {
@@ -2097,17 +2127,6 @@
       list.innerHTML = '';
     }
 
-    // 金額輸入快速按鈕（全部剩餘 / 一半）
-    const quick = document.getElementById('splitQuickBtns');
-    if (remain > 0) {
-      quick.innerHTML = `
-        <button type="button" class="split-quick-btn" onclick="document.getElementById('splitAmtInput').value=${remain}">全部 $${remain.toLocaleString()}</button>
-        <button type="button" class="split-quick-btn" onclick="document.getElementById('splitAmtInput').value=${Math.round(remain/2)}">一半 $${Math.round(remain/2).toLocaleString()}</button>
-      `;
-    } else {
-      quick.innerHTML = '';
-    }
-
     // 分類選擇格
     if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) _splitSelCat = CKEYS[0] || null;
     const grid = document.getElementById('splitCatGrid');
@@ -2137,10 +2156,10 @@
     if (remain <= 0) { toast('已經全部拆分完成了'); return; }
 
     const inputEl = document.getElementById('splitAmtInput');
-    const v = parseFloat(inputEl.value);
-    if (!v || v <= 0) { toast('請輸入要拆分的金額'); return; }
-    if (v > remain + 0.001) { toast('金額超過剩餘未拆金額'); return; }
+    let v = parseFloat(inputEl.value);
     if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) { toast('請選擇分類'); return; }
+    if (!v || v <= 0) { v = remain; }  // 未輸入金額 → 全部剩餘金額
+    if (v > remain + 0.001) { toast('金額超過剩餘未拆金額'); return; }
 
     if (!r.splits) r.splits = [];
     const sid = (r.splits.reduce((m, s) => Math.max(m, s.id), 0) || 0) + 1;
@@ -2636,7 +2655,7 @@
 
     const filterBanner = listFilterUnsplitOnly
       ? `<div class="list-filter-banner" onclick="listFilterUnsplitOnly=false;render()">
-          <span>📥 只顯示待拆帳項目 · 共 ${displayList.length} 筆</span>
+          <span>✄ 只顯示待拆帳項目 · 共 ${displayList.length} 筆</span>
           <span class="list-filter-close">✕ 取消</span>
         </div>`
       : listFilterUnlinked
@@ -2837,7 +2856,7 @@
         <div class="ana-total-num"><small>NT$</small>${total.toLocaleString()}</div>
       </div>
       ${unsplitRemain > 0 ? `<div class="ana-unsplit-banner" onclick="goToUnsplitFilter()">
-        <span>📥 本月待拆帳尚有 <b>$${unsplitRemain.toLocaleString()}</b> 未分配</span>
+        <span>✄ 本月待拆帳尚有 <b>$${unsplitRemain.toLocaleString()}</b> 未分配</span>
         <span class="ana-unsplit-go">前往明細 ›</span>
       </div>` : ''}
       <div class="ana-stack-wrap">
