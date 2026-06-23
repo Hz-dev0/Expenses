@@ -2678,6 +2678,7 @@
 
   /* ── 數字輸入 ── */
   function ni(v) {
+    console.trace('ni called with: ' + v);
     if (inp.length >= 6) return;
     if (v === '0' && inp === '') return;
     inp += v;
