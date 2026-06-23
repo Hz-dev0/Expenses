@@ -2656,7 +2656,11 @@
       else if (btn.dataset.ok  !== undefined) addRec();
     }, { passive: false });
 
-    grid.addEventListener('touchend',    e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
+    grid.addEventListener('touchend', e => {
+      const btn = e.target.closest('[data-n],[data-del],[data-ok]');
+      if (btn) e.preventDefault();
+      if (e.target.closest('[data-del]')) stopDel();
+    }, { passive: false });
     grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
 
     // 桌機 mousedown fallback（數字鍵）
