@@ -1087,6 +1087,18 @@
     .split-cat-btn span.lbl { font-size: 9px; font-weight: 600; color: var(--text); }
     .split-cat-btn:active, .split-cat-btn.sel { background: var(--rose); border-color: var(--rose); }
     .split-cat-btn.sel span.lbl { color: #fff; }
+    .split-cat-btn.has-subs { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
+    .split-subs-wrap {
+      grid-column: 1 / -1; background: rgba(220,170,170,0.08);
+      border: 1.5px solid var(--rose); border-radius: 12px;
+      padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; margin-top: -2px;
+    }
+    .split-sub-btn {
+      flex: 1; min-width: 64px; border: 1.5px solid var(--bdr); border-radius: 10px;
+      background: var(--bg1); padding: 6px 8px; font-size: 11px; font-weight: 700;
+      color: var(--roseDk); cursor: pointer; text-align: center; white-space: nowrap;
+    }
+    .split-sub-btn.sel { background: var(--rose); border-color: var(--rose); color: #fff; }
     .split-confirm-btn {
       width: 100%; padding: 12px 0; border-radius: 50px; border: none;
       background: linear-gradient(135deg,#ebb8b8,#d49898); color: #fff;
@@ -1281,7 +1293,7 @@
   <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
     <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:16px">備份 & 還原</div>
     <button onclick="backupJSON()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
-      <span style="font-size:22px">✄</span>
+      <span style="font-size:22px">✂️</span>
       <div>
         <div style="font-size:13px;font-weight:700;color:var(--text)">備份 JSON</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">下載完整備份（含預算設定）到手機</div>
@@ -1318,7 +1330,7 @@
 <!-- SPLIT (待拆帳) MODAL -->
 <div id="splitOverlay">
   <div id="splitBox">
-    <div id="splitTitle">✄ 拆分待拆帳</div>
+    <div id="splitTitle">✂️ 拆分待拆帳</div>
     <div id="splitSub"></div>
     <div class="split-remain-card">
       <div class="split-remain-label">尚未拆分金額</div>
@@ -1352,7 +1364,7 @@
   ];
   // 特殊分類：待拆帳。永遠存在、不可刪除、不計入預算規劃/分析統計。
   const UNSPLIT_KEY = 'unsplit';
-  const UNSPLIT_CAT = { key: UNSPLIT_KEY, icon: '✄', lbl: '待拆帳' };
+  const UNSPLIT_CAT = { key: UNSPLIT_KEY, icon: '✂️', lbl: '待拆帳' };
   // 分類被刪除後，舊紀錄的分類顯示用回退物件
   const UNCATEGORIZED = { icon: '🏷️', lbl: '未分類' };
 
@@ -2095,8 +2107,10 @@
 
   function closeSplitModal() {
     document.getElementById('splitOverlay').classList.remove('open');
-    _splitRecId = null;
+    _splitRecId  = null;
     _splitSelCat = null;
+    _splitSelSub = null;
+    _splitExpCat = null;
     render();
   }
 
@@ -2115,9 +2129,12 @@
       wrap.style.display = '';
       list.innerHTML = splits.map(s => {
         const c = CATS[s.cat] || { icon: '🏷️', lbl: '未分類' };
+        const subName = (s.subId !== undefined && bdgPlan[s.cat])
+          ? (bdgPlan[s.cat].subs.find(x => x.id === s.subId) || {}).name || '' : '';
+        const label = c.lbl + (subName ? ' › ' + subName : '') + (s.note ? ' · ' + esc(s.note) : '');
         return `<div class="split-existing-row">
           <span class="split-existing-icon">${c.icon}</span>
-          <span class="split-existing-name">${c.lbl}${s.note ? ' · ' + esc(s.note) : ''}</span>
+          <span class="split-existing-name">${label}</span>
           <span class="split-existing-amt">$${s.amt.toLocaleString()}</span>
           <button class="split-existing-del" onclick="removeSplitPortion(${s.id})" title="移除這筆拆分">✕</button>
         </div>`;
@@ -2127,15 +2144,30 @@
       list.innerHTML = '';
     }
 
-    // 分類選擇格
+    // 分類選擇格（支援子分類展開）
     if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) _splitSelCat = CKEYS[0] || null;
     const grid = document.getElementById('splitCatGrid');
-    grid.innerHTML = CKEYS.map(k => {
+    let gridHTML = '';
+    CKEYS.forEach(k => {
       const c = CATS[k];
-      return `<button type="button" class="split-cat-btn${k === _splitSelCat ? ' sel' : ''}" onclick="selectSplitCat('${k}')">
-        <span>${c.icon}</span><span class="lbl">${esc(c.lbl)}</span>
+      const plan = bdgPlan[k];
+      const hasSubs = plan && plan.subs && plan.subs.length > 0;
+      const isCatSel = k === _splitSelCat;
+      const isExp = k === _splitExpCat;
+      gridHTML += `<button type="button" class="split-cat-btn${isCatSel ? ' sel' : ''}${hasSubs ? ' has-subs' : ''}" onclick="selectSplitCat('${k}')">
+        <span>${c.icon}</span><span class="lbl">${esc(c.lbl)}${hasSubs ? ' ▾' : ''}</span>
       </button>`;
-    }).join('');
+      // 若此分類被展開，插入子分類列（跨全欄）
+      if (isExp && hasSubs) {
+        gridHTML += `<div class="split-subs-wrap">`;
+        plan.subs.forEach(s => {
+          const isSub = isCatSel && _splitSelSub === s.id;
+          gridHTML += `<button type="button" class="split-sub-btn${isSub ? ' sel' : ''}" onclick="selectSplitSub('${k}',${s.id})">${esc(s.name)}</button>`;
+        });
+        gridHTML += `</div>`;
+      }
+    });
+    grid.innerHTML = gridHTML;
 
     const confirmBtn = document.getElementById('splitConfirmBtn');
     confirmBtn.disabled = remain <= 0;
@@ -2145,7 +2177,36 @@
   }
 
   function selectSplitCat(k) {
+    const plan = bdgPlan[k];
+    const hasSubs = plan && plan.subs && plan.subs.length > 0;
+    if (hasSubs) {
+      // 有子分類：展開/收合切換；若已展開且再按一次 = 選大分類本身
+      if (_splitExpCat === k) {
+        if (_splitSelCat === k) {
+          // 已是大分類選中狀態 → 收合
+          _splitExpCat = null;
+        } else {
+          // 展開中但尚未選 → 選大分類本身
+          _splitSelCat = k;
+          _splitSelSub = null;
+        }
+      } else {
+        _splitExpCat = k;
+        _splitSelCat = k;
+        _splitSelSub = null;
+      }
+    } else {
+      // 無子分類：直接選取
+      _splitSelCat = k;
+      _splitSelSub = null;
+      _splitExpCat = null;
+    }
+    renderSplitModal();
+  }
+
+  function selectSplitSub(k, subId) {
     _splitSelCat = k;
+    _splitSelSub = subId;
     renderSplitModal();
   }
 
@@ -2163,17 +2224,23 @@
 
     if (!r.splits) r.splits = [];
     const sid = (r.splits.reduce((m, s) => Math.max(m, s.id), 0) || 0) + 1;
-    r.splits.push({ id: sid, amt: Math.round(v * 100) / 100, cat: _splitSelCat });
+    const entry = { id: sid, amt: Math.round(v * 100) / 100, cat: _splitSelCat };
+    if (_splitSelSub !== null) entry.subId = _splitSelSub;
+    r.splits.push(entry);
 
     save();
     inputEl.value = '';
+    _splitSelSub = null;
     renderSplitModal();
 
     const newRemain = unsplitRemaining(r);
+    const subName = (_splitSelSub !== null && bdgPlan[_splitSelCat])
+      ? (bdgPlan[_splitSelCat].subs.find(s => s.id === _splitSelSub) || {}).name || '' : '';
+    const catLabel = CATS[_splitSelCat].lbl + (subName ? ' › ' + subName : '');
     if (newRemain <= 0) {
       toast('🎉 已全部拆分完成！');
     } else {
-      toast('已拆分 $' + v.toLocaleString() + ' 到 ' + CATS[_splitSelCat].lbl);
+      toast('已拆分 $' + v.toLocaleString() + ' 到 ' + catLabel);
     }
   }
 
@@ -2655,7 +2722,7 @@
 
     const filterBanner = listFilterUnsplitOnly
       ? `<div class="list-filter-banner" onclick="listFilterUnsplitOnly=false;render()">
-          <span>✄ 只顯示待拆帳項目 · 共 ${displayList.length} 筆</span>
+          <span>✂️ 只顯示待拆帳項目 · 共 ${displayList.length} 筆</span>
           <span class="list-filter-close">✕ 取消</span>
         </div>`
       : listFilterUnlinked
@@ -2856,7 +2923,7 @@
         <div class="ana-total-num"><small>NT$</small>${total.toLocaleString()}</div>
       </div>
       ${unsplitRemain > 0 ? `<div class="ana-unsplit-banner" onclick="goToUnsplitFilter()">
-        <span>✄ 本月待拆帳尚有 <b>$${unsplitRemain.toLocaleString()}</b> 未分配</span>
+        <span>✂️ 本月待拆帳尚有 <b>$${unsplitRemain.toLocaleString()}</b> 未分配</span>
         <span class="ana-unsplit-go">前往明細 ›</span>
       </div>` : ''}
       <div class="ana-stack-wrap">
