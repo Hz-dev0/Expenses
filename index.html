@@ -2645,11 +2645,7 @@
       delTimeout = delInterval = null;
     };
 
-    // pointerdown 統一處理觸控與滑鼠，用 pointerType 避免重複觸發
-    let kbHasTouch = false;
-    grid.addEventListener('pointerdown', e => {
-      if (e.pointerType === 'touch') kbHasTouch = true;
-      if (e.pointerType === 'mouse' && kbHasTouch) return; // 觸控後的合成 mouse 事件，忽略
+    grid.addEventListener('touchstart', e => {
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       e.preventDefault();
@@ -2659,9 +2655,20 @@
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     }, { passive: false });
-    grid.addEventListener('pointerup',    e => { kbHasTouch = false; if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('pointercancel',e => { kbHasTouch = false; if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('mouseleave',   e => { if (delInterval || delTimeout) stopDel(); });
+
+    grid.addEventListener('touchend',    e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
+    grid.addEventListener('touchcancel', e => { if (e.target.closest('[data-del]')) stopDel(); }, { passive: true });
+
+    // 桌機 mousedown fallback（數字鍵）
+    grid.addEventListener('mousedown', e => {
+      const btn = e.target.closest('[data-n],[data-del],[data-ok]');
+      if (!btn) return;
+      if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
+      else if (btn.dataset.del !== undefined) startDel();
+      else if (btn.dataset.ok  !== undefined) addRec();
+    });
+    grid.addEventListener('mouseup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('mouseleave', e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
     document.getElementById('renameCancelBtn').onclick = closeRename;
@@ -2680,6 +2687,7 @@
 
   /* ── 數字輸入 ── */
   function ni(v) {
+    console.log('ni called:', v, new Error().stack.split('\n').slice(1,4).join(' | '));
     if (inp.length >= 6) return;
     if (v === '0' && inp === '') return;
     inp += v;
