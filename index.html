@@ -2516,6 +2516,18 @@
 
   /* ── 初始化 ── */
   async function init() {
+    // 防止重複初始化（Firebase 登入後會再呼叫一次）
+    if (window._initDone) {
+      // 只重新載入資料和重繪，不重新綁定事件
+      rebuildCats();
+      if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
+      initBdgPlan();
+      if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
+      renderCatBtns();
+      render();
+      return;
+    }
+    window._initDone = true;
     rebuildCats();
     // 還原上次使用的分類（跳過待拆帳）
     try {
@@ -3493,7 +3505,7 @@
     save(); saveCats(); saveBdgPlan();
   });
 
-  if (!window._appInited) { window._appInited = true; init(); }
+  init();
 </script>
 </body>
 </html>
