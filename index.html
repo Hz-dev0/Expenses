@@ -30,23 +30,59 @@
     // 掛到 window，讓非 module 的 script 可以存取
     window._fb = { auth, db, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, doc, setDoc, deleteDoc, getDoc, collection, getDocs, onSnapshot };
 
+    // ── UID 白名單（改這裡，不暴露 email）──
+    // 取得 UID 方式：先登入，頁面會顯示你的 UID，複製後貼到下方
+    const ALLOWED_UIDS = [
+      // 'UID_1_貼這裡',
+      // 'UID_2_貼這裡',
+    ];
+    const UID_LOCKED = ALLOWED_UIDS.length > 0; // 有填 UID 才啟用白名單
+
     // 監聽登入狀態
-    onAuthStateChanged(auth, user => {
-      window._fbUser = user || null;
+    onAuthStateChanged(auth, async user => {
       if (user) {
+        if (UID_LOCKED && !ALLOWED_UIDS.includes(user.uid)) {
+          // 不認識的人 → 立刻踢出，不留任何紀錄機會
+          await signOut(auth);
+          window._fbUser = null;
+          document.getElementById('loginOverlay').style.display = 'flex';
+          document.getElementById('loginDenied').style.display = 'block';
+          document.getElementById('loginUidHint').style.display = 'none';
+          return;
+        }
+
+        if (!UID_LOCKED) {
+          // 白名單還沒填：顯示 UID 給自己複製
+          document.getElementById('loginSyncBadge').textContent = user.uid;
+          document.getElementById('loginSyncBadge').style.userSelect = 'all';
+          document.getElementById('googleSignInBtn').style.display = 'none';
+          document.getElementById('loginUidHint').style.display = 'block';
+          document.getElementById('loginDenied').style.display = 'none';
+          return;
+        }
+
+        // 白名單通過 → 進入 App
+        document.getElementById('loginDenied').style.display = 'none';
+        window._fbUser = user;
         document.getElementById('loginOverlay').style.display = 'none';
-        // 第一次登入後初始化 app
         if (!window._appInited) {
           window._appInited = true;
           window._fbLoadAndInit();
         }
       } else {
+        window._fbUser = null;
         document.getElementById('loginOverlay').style.display = 'flex';
+        document.getElementById('loginSyncBadge').textContent = 'GOOGLE 登入';
+        document.getElementById('loginSyncBadge').style.userSelect = '';
+        document.getElementById('googleSignInBtn').style.display = 'flex';
+        document.getElementById('loginUidHint').style.display = 'none';
+        document.getElementById('loginDenied').style.display = 'none';
       }
     });
 
     window._googleSignIn = async () => {
       try {
+        document.getElementById('loginDenied').style.display = 'none';
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
       } catch(e) {
@@ -1287,6 +1323,20 @@
       letter-spacing: .8px;
       color: var(--muted);
       opacity: .6;
+      word-break: break-all;
+      text-align: center;
+      max-width: 280px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      transition: background .2s, opacity .2s;
+    }
+    .login-sync-badge[style*="all"] {
+      background: rgba(220,170,170,0.15);
+      opacity: 1;
+      color: var(--accent);
+      font-size: 11px;
+      letter-spacing: .3px;
+      cursor: text;
     }
   </style>
 </head>
@@ -1295,7 +1345,7 @@
 <!-- LOGIN OVERLAY -->
 <div id="loginOverlay">
   <h1>💰 記帳</h1>
-  <p>僅供受邀人使用。</p>
+  <p>登入後資料將即時同步至雲端，隨時隨地都能使用</p>
   <button id="googleSignInBtn" onclick="window._googleSignIn()" title="使用 Google 登入">
     <!-- Google G icon (official colors) -->
     <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -1305,7 +1355,13 @@
       <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
     </svg>
   </button>
-  <span class="login-sync-badge">GOOGLE 登入</span>
+  <span class="login-sync-badge" id="loginSyncBadge">GOOGLE 登入</span>
+  <div id="loginUidHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;max-width:280px;line-height:1.7">
+    👆 長按上方 UID 複製<br>貼到 Firebase Rules 白名單後即可使用
+  </div>
+  <div id="loginDenied" style="display:none;font-size:12px;font-weight:700;color:#e07070;background:rgba(224,112,112,0.1);border:1px solid rgba(224,112,112,0.3);border-radius:10px;padding:8px 16px;text-align:center;max-width:240px">
+    ❌ 此帳號無存取權限
+  </div>
 </div>
 
 <!-- TOP BAR -->
