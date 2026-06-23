@@ -2645,18 +2645,21 @@
       delTimeout = delInterval = null;
     };
 
-    // 數字鍵盤輸入：用 pointerdown 統一處理觸控與滑鼠，避免重複觸發
+    // 數字鍵盤輸入：只處理第一個 pointer，避免觸控裝置重複觸發
+    let kbActiveId = null;
     grid.addEventListener('pointerdown', e => {
+      if (kbActiveId !== null) return; // 已有 pointer 在處理中，忽略
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
+      kbActiveId = e.pointerId;
       btn.classList.add('pressed');
       setTimeout(() => btn.classList.remove('pressed'), 90);
       if (btn.dataset.n   !== undefined) ni(btn.dataset.n);
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     });
-    grid.addEventListener('pointerup',     e => { if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('pointercancel', e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointerup',     e => { if (e.pointerId === kbActiveId) kbActiveId = null; if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointercancel', e => { if (e.pointerId === kbActiveId) kbActiveId = null; if (e.target.closest('[data-del]')) stopDel(); });
     grid.addEventListener('mouseleave',    e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
