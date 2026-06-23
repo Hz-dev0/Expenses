@@ -8,6 +8,53 @@
   <link rel="manifest" href="./manifest.json">
   <title>記帳</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, setDoc, deleteDoc, getDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAKpdKG7Z9VftOewWAF8icxJDlyt-za8R4",
+      authDomain: "counter-e1ce2.firebaseapp.com",
+      projectId: "counter-e1ce2",
+      storageBucket: "counter-e1ce2.firebasestorage.app",
+      messagingSenderId: "1079520607651",
+      appId: "1:1079520607651:web:d75a7447f1c6de3e5e2e16"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // 掛到 window，讓非 module 的 script 可以存取
+    window._fb = { auth, db, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, doc, setDoc, deleteDoc, getDoc, collection, getDocs, onSnapshot };
+
+    // 監聽登入狀態
+    onAuthStateChanged(auth, user => {
+      window._fbUser = user || null;
+      if (user) {
+        document.getElementById('loginOverlay').style.display = 'none';
+        // 第一次登入後初始化 app
+        if (!window._appInited) {
+          window._appInited = true;
+          window._fbLoadAndInit();
+        }
+      } else {
+        document.getElementById('loginOverlay').style.display = 'flex';
+      }
+    });
+
+    window._googleSignIn = async () => {
+      try {
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(auth, provider);
+      } catch(e) {
+        console.error('登入失敗', e);
+        alert('登入失敗：' + e.message);
+      }
+    };
+  </script>
   <style>
     :root {
       --rose:   #e8b8b8;
@@ -1186,9 +1233,80 @@
     .ana-unsplit-banner:active { opacity: .7; }
     .ana-unsplit-banner b { font-family: "Montserrat",sans-serif; }
     .ana-unsplit-go { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+    /* ── 登入畫面 ── */
+    #loginOverlay {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(170deg, var(--bg1) 0%, var(--bg2) 100%);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 28px;
+    }
+    #loginOverlay h1 {
+      font-family: "Montserrat", sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.5px;
+    }
+    #loginOverlay p {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      max-width: 220px;
+      line-height: 1.6;
+    }
+    #googleSignInBtn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 1.5px solid var(--bdr);
+      background: #fff;
+      box-shadow: 0 3px 16px rgba(200,150,150,0.18);
+      cursor: pointer;
+      transition: box-shadow .2s, transform .15s;
+    }
+    #googleSignInBtn:active {
+      transform: scale(0.94);
+      box-shadow: 0 1px 6px rgba(200,150,150,0.12);
+    }
+    #googleSignInBtn svg {
+      width: 26px;
+      height: 26px;
+    }
+    .login-sync-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      color: var(--muted);
+      opacity: .6;
+    }
   </style>
 </head>
 <body>
+
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay">
+  <h1>💰 記帳</h1>
+  <p>僅供受邀人使用。</p>
+  <button id="googleSignInBtn" onclick="window._googleSignIn()" title="使用 Google 登入">
+    <!-- Google G icon (official colors) -->
+    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+    </svg>
+  </button>
+  <span class="login-sync-badge">GOOGLE 登入</span>
+</div>
 
 <!-- TOP BAR -->
 <div id="top">
@@ -1341,7 +1459,7 @@
         <div style="font-size:11px;color:var(--muted);margin-top:2px">用 Excel / Numbers 開啟</div>
       </div>
     </button>
-    <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:12px">💡 每新增 5 筆記帳會自動下載備份到手機</div>
+    <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:12px">☁️ 每筆記帳即時同步至 Firebase 雲端</div>
     <button onclick="closeBackupMenu()" style="width:100%;padding:11px 0;border-radius:50px;border:none;background:rgba(220,170,170,0.15);color:var(--muted);font-family:'Noto Sans TC',sans-serif;font-size:13px;font-weight:700;cursor:pointer">取消</button>
   </div>
 </div>
@@ -1475,11 +1593,13 @@
     const v = JSON.stringify(CATS_LIST);
     idbSet(SK_CATS, v);
     try { localStorage.setItem(SK_CATS, v); } catch(e) {}
+    fbSyncMeta(SK_CATS, v);
   };
   const saveBdg = () => {
     const v = String(budget);
     idbSet(SK_BDG, v);
     try { localStorage.setItem(SK_BDG, v); } catch(e) {}
+    fbSyncMeta(SK_BDG, v);
   };
   const saveMode = () => {
     const v = showBudgetTotal ? '1' : '0';
@@ -1892,6 +2012,7 @@
     const v = JSON.stringify(bdgPlan);
     idbSet(SK_BDGPLAN, v).catch(() => {});
     try { localStorage.setItem(SK_BDGPLAN, v); } catch(e) {}
+    fbSyncMeta(SK_BDGPLAN, v);
   };
 
   /* ── 預算規劃渲染 ── */
@@ -2246,14 +2367,19 @@
 
     // 若已全部拆完，刪除原始待拆帳紀錄並關閉
     if (r.amt <= 0) {
+      const delId = r.id;
       recs = recs.filter(x => x.id !== r.id);
       save();
+      fbSyncRec(newRec);
+      fbDeleteRec(delId);
       toast('🎉 已全部拆分完成！');
       closeSplitModal();
       return;
     }
 
     save();
+    fbSyncRec(newRec);
+    fbSyncRec(r);
     inputEl.value = '';
     _splitSelSub = null;
     renderSplitModal();
@@ -2324,6 +2450,7 @@
       toast('已關聯：' + c.icon + ' ' + c.lbl + (sub ? ' › ' + sub.name : ''));
     }
     save();
+    if (rec) fbSyncRec(rec);
     render();
     closeTreePicker();
   }
@@ -2337,9 +2464,17 @@
     lbl.textContent = d.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
   }
 
+  /* ── Firebase 初始化入口（登入後呼叫） ── */
+  window._fbLoadAndInit = async () => {
+    // 優先從 Firebase 載入資料，沒有再 fallback 本地
+    await fbLoadAll();
+    // 若 Firebase 也沒有資料，嘗試本地
+    if (recs.length === 0) await loadAll();
+    await init();
+  };
+
   /* ── 初始化 ── */
   async function init() {
-    await loadAll();
     rebuildCats();
     // 還原上次使用的分類（跳過待拆帳）
     try {
@@ -2554,9 +2689,10 @@
     if (!dv) { toast('請選日期'); return; }
 
     const note = document.getElementById('noteInp').value.trim();
-    recs.unshift({ id: _nextId++, date: dv, cat, amt, note });
+    const newRec = { id: _nextId++, date: dv, cat, amt, note };
+    recs.unshift(newRec);
     save();
-    autoBackupIfNeeded();
+    fbSyncRec(newRec);
 
     inp = '';
     ud();
@@ -2575,6 +2711,7 @@
     if (!r) return;
     r.exempt = !r.exempt;
     save();
+    fbSyncRec(r);
     render();
     toast(r.exempt ? '已從預算中排除' : '已計入預算');
   }
@@ -2672,6 +2809,7 @@
     if (!r) { closeEditNote(); return; }
     r.note = document.getElementById('editNoteInp').value.trim();
     save();
+    fbSyncRec(r);
     render();
     closeEditNote();
     toast('備註已更新');
@@ -2681,6 +2819,7 @@
   function delRec(id) {
     recs = recs.filter(r => r.id !== id);
     save();
+    fbDeleteRec(id);
     render();
   }
 
@@ -3082,27 +3221,80 @@
     closeBackupMenu();
   }
 
-  /* ── 自動靜默備份（每次新增記帳後，累積 N 筆才下載） ── */
-  const AUTO_BACKUP_EVERY = 5; // 每5筆自動備份一次
-  function autoBackupIfNeeded() {
-    // 用 localStorage 記錄上次備份時的筆數
-    const lastCount = parseInt(localStorage.getItem('kakeibo_last_backup_count') || '0', 10);
-    if (recs.length - lastCount >= AUTO_BACKUP_EVERY) {
-      localStorage.setItem('kakeibo_last_backup_count', String(recs.length));
-      // 靜默下載
-      const payload = { v: 3, ts: Date.now(), recs, bdgPlan, catsList: CATS_LIST };
-      const json = JSON.stringify(payload);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      const now  = new Date();
-      a.href     = url;
-      a.download = `記帳備份_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast('💾 已自動備份（每 ' + AUTO_BACKUP_EVERY + ' 筆一次）');
+  /* ── Firebase 同步 ── */
+  function _fbGetUserCol() {
+    if (!window._fb || !window._fbUser) return null;
+    return window._fb.collection(window._fb.db, 'users', window._fbUser.uid, 'recs');
+  }
+
+  async function fbSyncRec(rec) {
+    try {
+      const col = _fbGetUserCol();
+      if (!col) return;
+      const { doc, setDoc } = window._fb;
+      await setDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'recs', String(rec.id)), rec);
+    } catch(e) {
+      console.error('[FB] syncRec failed', e);
+    }
+  }
+
+  async function fbDeleteRec(id) {
+    try {
+      if (!window._fb || !window._fbUser) return;
+      const { doc, deleteDoc } = window._fb;
+      await deleteDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'recs', String(id)));
+    } catch(e) {
+      console.error('[FB] deleteRec failed', e);
+    }
+  }
+
+  async function fbSyncMeta(key, value) {
+    try {
+      if (!window._fb || !window._fbUser) return;
+      const { doc, setDoc } = window._fb;
+      await setDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'meta', key), { value });
+    } catch(e) {
+      console.error('[FB] syncMeta failed', e);
+    }
+  }
+
+  async function fbLoadAll() {
+    if (!window._fb || !window._fbUser) return;
+    const { db, collection, getDocs, doc, getDoc } = window._fb;
+    const uid = window._fbUser.uid;
+    // 讀取 recs
+    try {
+      const snap = await getDocs(collection(db, 'users', uid, 'recs'));
+      if (!snap.empty) {
+        recs = snap.docs.map(d => d.data());
+        recs.sort((a, b) => b.id - a.id);
+      }
+    } catch(e) { console.error('[FB] loadRecs failed', e); }
+    // 讀取 meta（分類、預算等）
+    const metaKeys = [SK_CATS, SK_BDG, SK_MODE, SK_BDGPLAN];
+    for (const k of metaKeys) {
+      try {
+        const snap = await getDoc(doc(db, 'users', uid, 'meta', k));
+        if (snap.exists()) {
+          const v = snap.data().value;
+          if (k === SK_CATS) {
+            const saved = JSON.parse(v);
+            if (Array.isArray(saved) && saved.length > 0) CATS_LIST = saved;
+          } else if (k === SK_BDG) {
+            budget = parseInt(v, 10) || 0;
+          } else if (k === SK_MODE) {
+            showBudgetTotal = (v === '1');
+          } else if (k === SK_BDGPLAN) {
+            const saved = JSON.parse(v);
+            if (typeof saved === 'object' && !Array.isArray(saved)) {
+              bdgPlan = saved;
+              Object.values(bdgPlan).forEach(p => {
+                (p.subs||[]).forEach(s => { if (s.id >= _subId) _subId = s.id + 1; });
+              });
+            }
+          }
+        }
+      } catch(e) { console.error('[FB] loadMeta failed', k, e); }
     }
   }
 
