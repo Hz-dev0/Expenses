@@ -438,7 +438,46 @@
     .note-inp::placeholder { color: var(--muted); opacity: .7; }
     .note-inp:focus { border-color: var(--rose); }
 
-    .kb-r3 { display: grid; grid-template-columns: repeat(3, 1fr) 46px; gap: 4px; }
+    .kb-r3 { display: flex; gap: 4px; min-height: 0; }
+    .kb-numgrid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(4, 1fr);
+      gap: 4px;
+      min-width: 0;
+    }
+    .kb-catcol {
+      width: 46px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      /* 讓捲動區域有把手感但不影響左側 */
+      touch-action: pan-y;
+      border-radius: 11px;
+    }
+    .kb-catcol::-webkit-scrollbar { width: 0; height: 0; }
+    .kb-catcol .cbt { flex-shrink: 0; min-height: 40px; }
+    .kb-catcol-addbtn {
+      flex-shrink: 0;
+      min-height: 30px;
+      border-radius: 11px;
+      border: 1.5px dashed var(--bdr);
+      background: rgba(235,185,185,0.05);
+      color: var(--rose);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .kb-catcol-addbtn:active { background: rgba(220,170,170,0.15); }
 
     .nb {
       border-radius: 11px;
@@ -484,6 +523,8 @@
     }
     .cbt.on      { background: var(--rose); border-color: var(--rose); box-shadow: 0 2px 8px rgba(220,160,160,0.4); }
     .cbt.pressed { opacity: .65; }
+    .cbt.cbt-unsplit { border-style: dashed; background: rgba(168,136,136,0.08); }
+    .cbt.cbt-unsplit.on { border-style: solid; background: var(--accent); border-color: var(--accent); }
 
 
 
@@ -831,6 +872,11 @@
     .bdgp-budget-tag { font-size: 10px; color: var(--muted); font-weight: 500; white-space: nowrap; }
     .bdgp-total { font-family: "Montserrat",sans-serif; font-size: 13px; font-weight: 800; color: var(--roseDk); white-space: nowrap; margin-left: 4px; }
     .bdgp-arrow { font-size: 9px; color: var(--rose); margin-left: 4px; cursor: pointer; padding: 4px; }
+    .bdgp-cat-del {
+      border: none; background: none; color: var(--muted); font-size: 12px; cursor: pointer;
+      padding: 4px 3px; flex-shrink: 0; opacity: .55;
+    }
+    .bdgp-cat-del:active { color: var(--danger); opacity: 1; }
 
     .bdgp-bar-wrap { padding: 0 14px 8px; margin-top: -4px; }
     .bdgp-bar-bg { height: 5px; border-radius: 3px; background: rgba(220,170,170,0.12); }
@@ -979,6 +1025,81 @@
       display: inline-block; font-size: 9px; color: var(--rose); font-weight: 600;
       background: rgba(232,184,184,0.2); border-radius: 4px; padding: 1px 5px; margin-left: 4px;
     }
+
+    /* 待拆帳 Modal */
+    #splitOverlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(74,58,58,0.5); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      z-index: 420; align-items: flex-end; justify-content: center;
+    }
+    #splitOverlay.open { display: flex; }
+    #splitBox {
+      background: var(--card); border-radius: 22px 22px 0 0;
+      padding: 18px 16px max(env(safe-area-inset-bottom,0px),16px);
+      width: 100%; max-width: 480px;
+      box-shadow: 0 -4px 32px rgba(200,140,140,0.22);
+      animation: slideUp .2s ease; max-height: 84vh; overflow-y: auto;
+    }
+    #splitTitle { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px; text-align: center; }
+    #splitSub { font-size: 11px; color: var(--muted); text-align: center; margin-bottom: 14px; }
+    .split-remain-card {
+      background: linear-gradient(135deg, rgba(216,196,168,0.25), rgba(200,176,144,0.12));
+      border: 1px solid rgba(180,150,110,0.28); border-radius: 14px;
+      padding: 12px 14px; margin-bottom: 14px; text-align: center;
+    }
+    .split-remain-label { font-size: 10px; color: #8a6d3b; letter-spacing: 1px; margin-bottom: 2px; }
+    .split-remain-num { font-family: "Montserrat",sans-serif; font-size: 24px; font-weight: 800; color: #8a6d3b; }
+    .split-remain-num small { font-size: 12px; font-weight: 600; margin-right: 1px; }
+    .split-existing { margin-bottom: 12px; }
+    .split-existing-row {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: rgba(235,185,185,0.08); border: 1px solid var(--bdr); border-radius: 10px; margin-bottom: 6px;
+    }
+    .split-existing-icon { font-size: 16px; }
+    .split-existing-name { flex: 1; font-size: 12px; font-weight: 600; color: var(--text); }
+    .split-existing-amt { font-family: "Montserrat",sans-serif; font-size: 13px; font-weight: 700; color: var(--roseDk); }
+    .split-existing-del {
+      border: none; background: none; color: var(--muted); font-size: 13px; cursor: pointer; padding: 2px 4px;
+    }
+    .split-existing-del:active { color: var(--danger); }
+    .split-input-row { margin-bottom: 10px; }
+    .split-input-label { font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+    .split-amt-input {
+      width: 100%; box-sizing: border-box; border: 1.5px solid var(--bdr); border-radius: 12px;
+      padding: 11px 14px; font-family: "Montserrat",sans-serif; font-size: 20px; font-weight: 800;
+      color: var(--text); background: var(--bg1); outline: none; text-align: center;
+    }
+    .split-amt-input:focus { border-color: var(--rose); }
+    .split-quick-btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .split-quick-btn {
+      flex: 1; min-width: 56px; border: 1.5px solid var(--bdr); border-radius: 10px; background: var(--bg1);
+      padding: 7px 4px; font-size: 11px; font-weight: 700; color: var(--roseDk); cursor: pointer;
+    }
+    .split-quick-btn:active { background: rgba(220,170,170,0.18); }
+    .split-cat-label { font-size: 11px; color: var(--muted); font-weight: 600; margin: 12px 0 6px; }
+    .split-cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 14px; }
+    .split-cat-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      border: 1.5px solid var(--bdr); border-radius: 12px; background: var(--bg1);
+      padding: 9px 2px; cursor: pointer; font-size: 18px;
+    }
+    .split-cat-btn span.lbl { font-size: 9px; font-weight: 600; color: var(--text); }
+    .split-cat-btn:active, .split-cat-btn.sel { background: var(--rose); border-color: var(--rose); }
+    .split-cat-btn.sel span.lbl { color: #fff; }
+    .split-confirm-btn {
+      width: 100%; padding: 12px 0; border-radius: 50px; border: none;
+      background: linear-gradient(135deg,#ebb8b8,#d49898); color: #fff;
+      font-family: "Noto Sans TC",sans-serif; font-size: 14px; font-weight: 800; cursor: pointer;
+      box-shadow: 0 3px 12px rgba(220,160,160,0.35); margin-bottom: 8px;
+    }
+    .split-confirm-btn:active { background: var(--accent); }
+    .split-confirm-btn:disabled { opacity: .4; pointer-events: none; }
+    #splitCancelBtn {
+      width: 100%; padding: 10px 0; border-radius: 50px; border: none;
+      background: rgba(220,170,170,0.15); color: var(--muted);
+      font-family: "Noto Sans TC",sans-serif; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    #splitCancelBtn:active { background: rgba(220,170,170,0.28); }
     /* 分析展開細分類 */
     .ana-subs-wrap { padding: 8px 2px 4px; border-top: 1px solid var(--bdr); margin-top: 6px; }
     .ana-sub-row {
@@ -1007,6 +1128,23 @@
       font-size: 11px; color: var(--muted); font-weight: 700;
       background: rgba(220,170,170,0.18); border-radius: 20px; padding: 2px 8px;
     }
+    .ri-unsplit-tag {
+      color: var(--accent) !important; background: rgba(168,136,136,0.16) !important;
+    }
+    .ri-unsplit-done {
+      color: #8fae8f !important; background: rgba(143,174,143,0.16) !important;
+    }
+    .ri.ri-unsplit .ri-ico { background: rgba(168,136,136,0.1); border-radius: 50%; }
+    .ana-unsplit-banner {
+      display: flex; align-items: center; justify-content: space-between;
+      background: linear-gradient(135deg, rgba(216,196,168,0.28), rgba(200,176,144,0.14));
+      border: 1px solid rgba(180,150,110,0.3);
+      border-radius: 12px; padding: 10px 14px; margin-bottom: 10px;
+      font-size: 12px; font-weight: 600; color: #8a6d3b; cursor: pointer;
+    }
+    .ana-unsplit-banner:active { opacity: .7; }
+    .ana-unsplit-banner b { font-family: "Montserrat",sans-serif; }
+    .ana-unsplit-go { font-size: 11px; color: var(--muted); white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -1062,34 +1200,36 @@
     <input class="note-inp" id="noteInp" type="text" placeholder="備註（選填）" autocomplete="off">
   </div>
   <div class="kb-r3" id="kbGrid">
-    <button class="nb"      data-n="7">7</button>
-    <button class="nb"      data-n="8">8</button>
-    <button class="nb"      data-n="9">9</button>
-    <button class="cbt on"  data-c="food" id="cbt-food"></button>
-
-    <button class="nb"  data-n="4">4</button>
-    <button class="nb"  data-n="5">5</button>
-    <button class="nb"  data-n="6">6</button>
-    <button class="cbt" data-c="snack" id="cbt-snack"></button>
-
-    <button class="nb"  data-n="1">1</button>
-    <button class="nb"  data-n="2">2</button>
-    <button class="nb"  data-n="3">3</button>
-    <button class="cbt" data-c="fun" id="cbt-fun"></button>
-
-    <button class="nb del" data-del>⌫</button>
-    <button class="nb"     data-n="0">0</button>
-    <button class="nb ok"  data-ok>記帳</button>
-    <button class="cbt"    data-c="daily" id="cbt-daily"></button>
+    <div class="kb-numgrid">
+      <button class="nb"      data-n="7">7</button>
+      <button class="nb"      data-n="8">8</button>
+      <button class="nb"      data-n="9">9</button>
+      <button class="nb"  data-n="4">4</button>
+      <button class="nb"  data-n="5">5</button>
+      <button class="nb"  data-n="6">6</button>
+      <button class="nb"  data-n="1">1</button>
+      <button class="nb"  data-n="2">2</button>
+      <button class="nb"  data-n="3">3</button>
+      <button class="nb del" data-del>⌫</button>
+      <button class="nb"     data-n="0">0</button>
+      <button class="nb ok"  data-ok>記帳</button>
+    </div>
+    <div class="kb-catcol" id="kbCatCol"></div>
   </div>
 </div>
 
 <!-- RENAME MODAL -->
 <div id="renameOverlay">
   <div id="renameBox">
-    <div id="renameTitle">長按分類以重新命名</div>
-    <input id="renameInput" type="text" maxlength="6" autocomplete="off" spellcheck="false">
+    <div id="renameTitle">編輯分類</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button id="renameIconBtn" onclick="openEmojiPicker(renameTarget, true)" title="更換圖示"
+        style="flex-shrink:0;width:44px;height:44px;border-radius:50%;border:1.5px solid var(--bdr);background:var(--bg1);font-size:21px;display:flex;align-items:center;justify-content:center;cursor:pointer"></button>
+      <input id="renameInput" type="text" maxlength="6" autocomplete="off" spellcheck="false" style="flex:1">
+    </div>
     <div class="rename-btns">
+      <button id="renameDelBtn" onclick="deleteCategory(renameTarget)"
+        style="background:rgba(224,112,112,0.12);color:var(--danger);flex:0 0 auto;padding:10px 16px">刪除</button>
       <button id="renameCancelBtn">取消</button>
       <button id="renameOkBtn">確認</button>
     </div>
@@ -1174,21 +1314,61 @@
   </div>
 </div>
 
+<!-- SPLIT (待拆帳) MODAL -->
+<div id="splitOverlay">
+  <div id="splitBox">
+    <div id="splitTitle">📥 拆分待拆帳</div>
+    <div id="splitSub"></div>
+    <div class="split-remain-card">
+      <div class="split-remain-label">尚未拆分金額</div>
+      <div class="split-remain-num"><small>NT$</small><span id="splitRemainNum">0</span></div>
+    </div>
+    <div class="split-existing" id="splitExistingWrap" style="display:none">
+      <div id="splitExistingList"></div>
+    </div>
+    <div class="split-input-row">
+      <div class="split-input-label">這筆要拆分多少金額？</div>
+      <input type="number" inputmode="decimal" class="split-amt-input" id="splitAmtInput" placeholder="0">
+      <div class="split-quick-btns" id="splitQuickBtns"></div>
+    </div>
+    <div class="split-cat-label">分配到哪個分類？</div>
+    <div class="split-cat-grid" id="splitCatGrid"></div>
+    <button class="split-confirm-btn" id="splitConfirmBtn" onclick="confirmSplitPortion()">確認拆分這筆</button>
+    <button id="splitCancelBtn" onclick="closeSplitModal()">完成 / 關閉</button>
+  </div>
+</div>
+
 <!-- TOAST -->
 <div id="toast"></div>
 
 <script>
-  /* ── 預設分類（支援自訂名稱） ── */
-  const DEFAULT_CATS = {
-    food:  { icon: '🍴', lbl: '食物'  },
-    snack: { icon: '🍫', lbl: '零食'  },
-    fun:   { icon: '✨', lbl: '娛樂'  },
-    daily: { icon: '🧻', lbl: '日用品' },
-  };
-  const CKEYS  = Object.keys(DEFAULT_CATS);
-  const CAT_C  = ['#e8b8b8', '#b8d4e8', '#b8e8cc', '#e8ddb8'];
+  /* ── 分類（可自由新增/刪除/排序） ── */
+  // CATS_LIST 為唯一真實來源（順序 = 顯示順序），CATS / CKEYS 由它派生
+  let CATS_LIST = [
+    { key: 'food',  icon: '🍴', lbl: '食物'  },
+    { key: 'snack', icon: '🍫', lbl: '零食'  },
+    { key: 'fun',   icon: '✨', lbl: '娛樂'  },
+    { key: 'daily', icon: '🧻', lbl: '日用品' },
+  ];
+  // 特殊分類：待拆帳。永遠存在、不可刪除、不計入預算規劃/分析統計。
+  const UNSPLIT_KEY = 'unsplit';
+  const UNSPLIT_CAT = { key: UNSPLIT_KEY, icon: '📥', lbl: '待拆帳' };
+  // 分類被刪除後，舊紀錄的分類顯示用回退物件
+  const UNCATEGORIZED = { icon: '🏷️', lbl: '未分類' };
+
+  const CAT_C_POOL = ['#e8b8b8','#b8d4e8','#b8e8cc','#e8ddb8','#d8c4e8','#e8c4a8','#a8d8d0','#e8a8c0','#c8d8a0','#a8c0e8'];
+  const catColor = (i) => CAT_C_POOL[i % CAT_C_POOL.length];
+
+  let _catSeq = 1; // 新分類 key 自增序號
+  const newCatKey = () => 'cat' + (_catSeq++) + '_' + Date.now().toString(36);
+
+  const CKEYS = []; // 動態：一般分類 key 清單（不含 unsplit），由 rebuildCats() 填入
+  let CATS = {};    // 動態：依 key 查找（含 unsplit）
+
   const SK      = 'kakeibo_v2';
   const SK_LBL  = 'kakeibo_labels';
+  const SK_ICONS = 'kakeibo_icons';
+  const SK_CATS = 'kakeibo_cats_list';
   const SK_BDG  = 'kakeibo_budget';
   const SK_MODE = 'kakeibo_budget_mode';
   const IDB_NAME = 'kakeibo_db';
@@ -1241,10 +1421,10 @@
       toast('⚠️ 儲存失敗！請立即匯出備份');
     }
   };
-  const saveLbl = () => {
-    const v = JSON.stringify(getCustomLabels());
-    idbSet(SK_LBL, v);
-    try { localStorage.setItem(SK_LBL, v); } catch(e) {}
+  const saveCats = () => {
+    const v = JSON.stringify(CATS_LIST);
+    idbSet(SK_CATS, v);
+    try { localStorage.setItem(SK_CATS, v); } catch(e) {}
   };
   const saveBdg = () => {
     const v = String(budget);
@@ -1273,31 +1453,44 @@
     } catch(e) {
       try { const ls = localStorage.getItem(SK); if (ls) recs = JSON.parse(ls); } catch(e2) {}
     }
-    // labels
+    // 分類清單（新格式，含順序、新增/刪除）
+    let catsListLoaded = false;
     try {
-      const idbVal = await idbGet(SK_LBL);
-      const lsVal  = localStorage.getItem(SK_LBL);
+      const idbVal = await idbGet(SK_CATS);
+      const lsVal  = localStorage.getItem(SK_CATS);
       const v = idbVal || lsVal;
       if (v) {
         const saved = JSON.parse(v);
-        CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].lbl = saved[k]; });
-        if (idbVal && !lsVal) { try { localStorage.setItem(SK_LBL, idbVal); } catch(e) {} }
-        if (!idbVal && lsVal) { idbSet(SK_LBL, lsVal); }
+        if (Array.isArray(saved) && saved.length > 0) {
+          CATS_LIST = saved;
+          catsListLoaded = true;
+        }
+        if (idbVal && !lsVal) { try { localStorage.setItem(SK_CATS, idbVal); } catch(e) {} }
+        if (!idbVal && lsVal) { idbSet(SK_CATS, lsVal); }
       }
     } catch(e) {}
 
-    // icons
-    try {
-      const idbVal = await idbGet(SK_ICONS);
-      const lsVal  = localStorage.getItem(SK_ICONS);
-      const v = idbVal || lsVal;
-      if (v) {
-        const saved = JSON.parse(v);
-        CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].icon = saved[k]; });
-        if (idbVal && !lsVal) { try { localStorage.setItem(SK_ICONS, idbVal); } catch(e) {} }
-        if (!idbVal && lsVal) { idbSet(SK_ICONS, lsVal); }
-      }
-    } catch(e) {}
+    // 舊版相容：若沒有新格式分類清單，套用舊版 labels/icons 覆寫到預設分類上
+    if (!catsListLoaded) {
+      try {
+        const idbVal = await idbGet(SK_LBL);
+        const lsVal  = localStorage.getItem(SK_LBL);
+        const v = idbVal || lsVal;
+        if (v) {
+          const saved = JSON.parse(v);
+          CATS_LIST.forEach(c => { if (saved[c.key]) c.lbl = saved[c.key]; });
+        }
+      } catch(e) {}
+      try {
+        const idbVal = await idbGet(SK_ICONS);
+        const lsVal  = localStorage.getItem(SK_ICONS);
+        const v = idbVal || lsVal;
+        if (v) {
+          const saved = JSON.parse(v);
+          CATS_LIST.forEach(c => { if (saved[c.key]) c.icon = saved[c.key]; });
+        }
+      } catch(e) {}
+    }
 
     // bdgPlan
     try {
@@ -1343,21 +1536,19 @@
   let vy, vm;
   let ctab         = 'list';
   let collapsed    = {};
-  let CATS         = {};
   let renameTarget = null;
   let budget       = 0;
   let showBudgetTotal = false;
   let _nextId = Date.now(); // 自增 id，避免同毫秒碰撞
 
-  const getCustomLabels = () => {
-    const out = {};
-    CKEYS.forEach(k => { out[k] = CATS[k].lbl; });
-    return out;
-  };
-
   const rebuildCats = () => {
     CATS = {};
-    CKEYS.forEach(k => { CATS[k] = { ...DEFAULT_CATS[k] }; });
+    CKEYS.length = 0;
+    CATS_LIST.forEach(c => {
+      CATS[c.key] = { icon: c.icon, lbl: c.lbl };
+      CKEYS.push(c.key);
+    });
+    CATS[UNSPLIT_KEY] = { icon: UNSPLIT_CAT.icon, lbl: UNSPLIT_CAT.lbl };
   };
 
   const fmtD = d =>
@@ -1368,22 +1559,77 @@
   const esc = s =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  /* ── 分類按鈕渲染 ── */
+  /* ── 待拆帳工具函式 ── */
+  const unsplitSplitSum = r => (r.splits || []).reduce((s, x) => s + x.amt, 0);
+  const unsplitRemaining = r => Math.max(0, Math.round((r.amt - unsplitSplitSum(r)) * 100) / 100);
+  const isUnsplitDone = r => r.cat === UNSPLIT_KEY && unsplitRemaining(r) <= 0;
+  // 取得目前所有「待拆帳」紀錄中尚未分配完的總金額（跨全部歷史，不限本月）
+  const totalUnsplitRemaining = () =>
+    recs.filter(r => r.cat === UNSPLIT_KEY)
+        .reduce((s, r) => s + unsplitRemaining(r), 0);
+
+  /* ── 分類按鈕渲染（動態建立可捲動清單） ── */
   function renderCatBtns() {
-    CKEYS.forEach(k => {
-      const btn = document.getElementById('cbt-' + k);
-      if (btn) btn.textContent = CATS[k].icon;
-    });
+    const col = document.getElementById('kbCatCol');
+    if (!col) return;
+    const allKeys = [...CKEYS, UNSPLIT_KEY];
+    col.innerHTML = allKeys.map(k => {
+      const c = CATS[k];
+      const isOn = k === cat;
+      const isUnsplit = k === UNSPLIT_KEY;
+      return `<button class="cbt${isOn ? ' on' : ''}${isUnsplit ? ' cbt-unsplit' : ''}" data-c="${k}" id="cbt-${k}">${c.icon}</button>`;
+    }).join('') + `<button class="kb-catcol-addbtn" id="kbCatAddBtn" title="新增分類">＋</button>`;
+    const addBtn = document.getElementById('kbCatAddBtn');
+    if (addBtn) addBtn.onclick = () => { addNewCategory(); };
   }
 
-  /* ── 長按 Rename Modal ── */
+  /* ── 分類清單操作 ── */
+  const findCat = key => CATS_LIST.find(c => c.key === key);
+
+  function addNewCategory() {
+    const key = newCatKey();
+    CATS_LIST.push({ key, icon: '🏷️', lbl: '新分類' });
+    rebuildCats();
+    initBdgPlan();
+    saveCats();
+    saveBdgPlan();
+    renderCatBtns();
+    render();
+    setTimeout(() => openRename(key), 80);
+    return key;
+  }
+
+  function deleteCategory(key) {
+    if (CATS_LIST.length <= 1) { toast('至少要保留一個分類'); return; }
+    const c = findCat(key);
+    if (!c) return;
+    const ok = confirm(`刪除分類「${c.lbl}」？\n此分類下的記帳記錄會保留，但分類標籤會顯示為「未分類」。`);
+    if (!ok) return;
+    CATS_LIST = CATS_LIST.filter(x => x.key !== key);
+    delete bdgPlan[key];
+    rebuildCats();
+    if (cat === key) cat = CKEYS[0]; // 若刪除的正是目前選取的分類，重置為第一個分類
+    saveCats();
+    saveBdgPlan();
+    renderCatBtns();
+    closeRename();
+    render();
+    toast('已刪除：' + c.lbl);
+  }
+
+  /* ── 長按 Rename Modal（含改名 / 換圖示 / 刪除 / 新增） ── */
   function openRename(key) {
+    if (key === UNSPLIT_KEY) { toast('「待拆帳」是系統分類，無法編輯'); return; }
     renameTarget = key;
     const overlay = document.getElementById('renameOverlay');
     const inp     = document.getElementById('renameInput');
     const title   = document.getElementById('renameTitle');
-    title.textContent = CATS[key].icon + '  重新命名分類';
+    const delBtn  = document.getElementById('renameDelBtn');
+    const iconBtn = document.getElementById('renameIconBtn');
+    title.textContent = '編輯分類';
     inp.value = CATS[key].lbl;
+    iconBtn.textContent = CATS[key].icon;
+    if (delBtn) delBtn.style.display = (key === UNSPLIT_KEY || CATS_LIST.length <= 1) ? 'none' : '';
     overlay.classList.add('open');
     // 延遲 focus 以避免 iOS 鍵盤閃動
     setTimeout(() => { inp.focus(); inp.select(); }, 120);
@@ -1399,9 +1645,10 @@
     const val = document.getElementById('renameInput').value.trim();
     if (!val) { toast('名稱不能為空'); return; }
     if (renameTarget) {
-      CATS[renameTarget].lbl       = val;
-      DEFAULT_CATS[renameTarget].lbl = val; // 同步，避免 rebuildCats 覆蓋
-      saveLbl();
+      CATS[renameTarget].lbl = val;
+      const c = findCat(renameTarget);
+      if (c) c.lbl = val;
+      saveCats();
       renderCatBtns();
       toast('已更新：' + val);
     }
@@ -1418,29 +1665,12 @@
     '💰','💳','🏦','📦','🐶','🐱','🌸','🌿','☀️','🌙','❤️','⭐','🔥','💎','🎀'
   ];
 
-  const SK_ICONS = 'kakeibo_icons';
   let emojiTarget = null;
+  let emojiFromRename = false; // 是否從編輯分類視窗開啟（需要同步圖示按鈕）
 
-  function loadCustomIcons() {
-    try {
-      const v = localStorage.getItem(SK_ICONS);
-      if (v) {
-        const saved = JSON.parse(v);
-        CKEYS.forEach(k => { if (saved[k]) DEFAULT_CATS[k].icon = saved[k]; });
-      }
-    } catch(e) {}
-  }
-
-  function saveCustomIcons() {
-    const out = {};
-    CKEYS.forEach(k => { out[k] = CATS[k].icon; });
-    const v = JSON.stringify(out);
-    idbSet(SK_ICONS, v);
-    try { localStorage.setItem(SK_ICONS, v); } catch(e) {}
-  }
-
-  function openEmojiPicker(key) {
+  function openEmojiPicker(key, fromRename) {
     emojiTarget = key;
+    emojiFromRename = !!fromRename;
     const overlay = document.getElementById('emojiOverlay');
     const title   = document.getElementById('emojiTitle');
     title.textContent = CATS[key].icon + '  選擇新圖示';
@@ -1466,11 +1696,16 @@
       if (!btn || !emojiTarget) return;
       const emoji = btn.dataset.emoji;
       CATS[emojiTarget].icon = emoji;
-      DEFAULT_CATS[emojiTarget].icon = emoji;
-      saveCustomIcons();
+      const c = findCat(emojiTarget);
+      if (c) c.icon = emoji;
+      saveCats();
       renderCatBtns();
       render();
       closeEmojiPicker();
+      if (emojiFromRename && renameTarget) {
+        const iconBtn = document.getElementById('renameIconBtn');
+        if (iconBtn) iconBtn.textContent = emoji;
+      }
       toast('已更新圖示 ' + emoji);
     });
   }
@@ -1519,7 +1754,7 @@
           // double tap → emoji picker
           lastTapTime = 0;
           lastTapKey = null;
-          openEmojiPicker(key);
+          if (key !== UNSPLIT_KEY) openEmojiPicker(key);
           return;
         }
         lastTapTime = now;
@@ -1548,7 +1783,7 @@
 
     grid.addEventListener('dblclick', e => {
       const btn = e.target.closest('.cbt');
-      if (!btn) return;
+      if (!btn || btn.dataset.c === UNSPLIT_KEY) return;
       openEmojiPicker(btn.dataset.c);
     });
 
@@ -1557,6 +1792,13 @@
 
   /* ── 未關聯過濾模式 ── */
   let listFilterUnlinked = false;
+  let listFilterUnsplitOnly = false;
+
+  function goToUnsplitFilter() {
+    listFilterUnsplitOnly = true;
+    listFilterUnlinked = false;
+    goTab('list');
+  }
 
   function setupListLongPress() {
     const btn = document.getElementById('tabList');
@@ -1701,6 +1943,7 @@
           <span class="bdgp-name">${esc(c.lbl)}</span>
           <span class="bdgp-budget-tag">${plan.budget > 0 ? '預算 $'+plan.budget.toLocaleString() : '未設細分'}</span>
           <span class="bdgp-total${isOver?' over':''}">$${spent.toLocaleString()}</span>
+          <button class="bdgp-cat-del" onclick="event.stopPropagation();deleteCategory('${k}')" title="刪除分類">✕</button>
           <span class="bdgp-arrow">${plan.open ? '▴' : '▾'}</span>
         </div>
         ${plan.budget > 0 ? `<div class="bdgp-bar-wrap"><div class="bdgp-bar-bg"><div class="bdgp-bar-fill${isOver?' over':''}" style="width:${pct}%"></div></div></div>` : ''}
@@ -1717,7 +1960,11 @@
       </div>`;
     });
 
-    panel.innerHTML = `<div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1.2px;padding:10px 4px 6px">預算規劃</div>${summaryHtml}${itemsHtml}`;
+    panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px 6px">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1.2px">預算規劃</span>
+      <button onclick="addNewCategory()" title="新增分類"
+        style="width:24px;height:24px;border-radius:50%;border:1.5px solid var(--rose);background:rgba(235,185,185,0.12);color:var(--roseDk);font-size:15px;font-weight:800;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">＋</button>
+    </div>${summaryHtml}${itemsHtml}`;
   }
 
   function renameBdgSub(k, sid, val) {
@@ -1790,6 +2037,126 @@
   function closeTreePicker() {
     document.getElementById('treeOverlay').classList.remove('open');
     _treeRecId = null;
+  }
+
+  /* ── 待拆帳 Modal ── */
+  let _splitRecId  = null;
+  let _splitSelCat = null;
+
+  function openSplitModal(recId) {
+    const r = recs.find(x => x.id === recId);
+    if (!r || r.cat !== UNSPLIT_KEY) return;
+    _splitRecId  = recId;
+    _splitSelCat = CKEYS[0] || null;
+    document.getElementById('splitSub').textContent =
+      (r.note ? r.note + ' · ' : '') + '原始金額 NT$' + r.amt.toLocaleString();
+    renderSplitModal();
+    document.getElementById('splitOverlay').classList.add('open');
+    setTimeout(() => document.getElementById('splitAmtInput').focus(), 150);
+  }
+
+  function closeSplitModal() {
+    document.getElementById('splitOverlay').classList.remove('open');
+    _splitRecId = null;
+    _splitSelCat = null;
+    render();
+  }
+
+  function renderSplitModal() {
+    const r = recs.find(x => x.id === _splitRecId);
+    if (!r) { closeSplitModal(); return; }
+    const remain = unsplitRemaining(r);
+
+    document.getElementById('splitRemainNum').textContent = remain.toLocaleString();
+
+    // 已拆分清單
+    const wrap = document.getElementById('splitExistingWrap');
+    const list = document.getElementById('splitExistingList');
+    const splits = r.splits || [];
+    if (splits.length > 0) {
+      wrap.style.display = '';
+      list.innerHTML = splits.map(s => {
+        const c = CATS[s.cat] || { icon: '🏷️', lbl: '未分類' };
+        return `<div class="split-existing-row">
+          <span class="split-existing-icon">${c.icon}</span>
+          <span class="split-existing-name">${c.lbl}${s.note ? ' · ' + esc(s.note) : ''}</span>
+          <span class="split-existing-amt">$${s.amt.toLocaleString()}</span>
+          <button class="split-existing-del" onclick="removeSplitPortion(${s.id})" title="移除這筆拆分">✕</button>
+        </div>`;
+      }).join('');
+    } else {
+      wrap.style.display = 'none';
+      list.innerHTML = '';
+    }
+
+    // 金額輸入快速按鈕（全部剩餘 / 一半）
+    const quick = document.getElementById('splitQuickBtns');
+    if (remain > 0) {
+      quick.innerHTML = `
+        <button type="button" class="split-quick-btn" onclick="document.getElementById('splitAmtInput').value=${remain}">全部 $${remain.toLocaleString()}</button>
+        <button type="button" class="split-quick-btn" onclick="document.getElementById('splitAmtInput').value=${Math.round(remain/2)}">一半 $${Math.round(remain/2).toLocaleString()}</button>
+      `;
+    } else {
+      quick.innerHTML = '';
+    }
+
+    // 分類選擇格
+    if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) _splitSelCat = CKEYS[0] || null;
+    const grid = document.getElementById('splitCatGrid');
+    grid.innerHTML = CKEYS.map(k => {
+      const c = CATS[k];
+      return `<button type="button" class="split-cat-btn${k === _splitSelCat ? ' sel' : ''}" onclick="selectSplitCat('${k}')">
+        <span>${c.icon}</span><span class="lbl">${esc(c.lbl)}</span>
+      </button>`;
+    }).join('');
+
+    const confirmBtn = document.getElementById('splitConfirmBtn');
+    confirmBtn.disabled = remain <= 0;
+    confirmBtn.textContent = remain <= 0 ? '已全部拆分完成' : '確認拆分這筆';
+
+    document.getElementById('splitAmtInput').max = remain;
+  }
+
+  function selectSplitCat(k) {
+    _splitSelCat = k;
+    renderSplitModal();
+  }
+
+  function confirmSplitPortion() {
+    const r = recs.find(x => x.id === _splitRecId);
+    if (!r) return;
+    const remain = unsplitRemaining(r);
+    if (remain <= 0) { toast('已經全部拆分完成了'); return; }
+
+    const inputEl = document.getElementById('splitAmtInput');
+    const v = parseFloat(inputEl.value);
+    if (!v || v <= 0) { toast('請輸入要拆分的金額'); return; }
+    if (v > remain + 0.001) { toast('金額超過剩餘未拆金額'); return; }
+    if (!_splitSelCat || !CKEYS.includes(_splitSelCat)) { toast('請選擇分類'); return; }
+
+    if (!r.splits) r.splits = [];
+    const sid = (r.splits.reduce((m, s) => Math.max(m, s.id), 0) || 0) + 1;
+    r.splits.push({ id: sid, amt: Math.round(v * 100) / 100, cat: _splitSelCat });
+
+    save();
+    inputEl.value = '';
+    renderSplitModal();
+
+    const newRemain = unsplitRemaining(r);
+    if (newRemain <= 0) {
+      toast('🎉 已全部拆分完成！');
+    } else {
+      toast('已拆分 $' + v.toLocaleString() + ' 到 ' + CATS[_splitSelCat].lbl);
+    }
+  }
+
+  function removeSplitPortion(splitId) {
+    const r = recs.find(x => x.id === _splitRecId);
+    if (!r || !r.splits) return;
+    r.splits = r.splits.filter(s => s.id !== splitId);
+    save();
+    renderSplitModal();
+    toast('已移除該筆拆分');
   }
 
   function renderTreeContent(cur) {
@@ -1871,6 +2238,7 @@
   async function init() {
     await loadAll();
     rebuildCats();
+    if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
     initBdgPlan(); // 確保每個 catKey 都有預算結構
     // 從現有資料的最大 id 繼續，避免重複
     if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
@@ -1925,6 +2293,11 @@
     document.getElementById('treeCancelBtn').onclick = closeTreePicker;
     document.getElementById('treeOverlay').addEventListener('click', e => {
       if (e.target === document.getElementById('treeOverlay')) closeTreePicker();
+    });
+
+    // split overlay (待拆帳)
+    document.getElementById('splitOverlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('splitOverlay')) closeSplitModal();
     });
 
     // backup menu overlay
@@ -2244,13 +2617,20 @@
   function renderList(mrs, allMrs) {
     const lp = document.getElementById('listPanel');
 
-    // 過濾模式：只看未關聯預算的項目
+    // 過濾模式：只看未關聯預算的項目 / 只看待拆帳項目
     let displayList = mrs;
-    if (listFilterUnlinked) {
+    if (listFilterUnsplitOnly) {
+      displayList = mrs.filter(r => r.cat === UNSPLIT_KEY && unsplitRemaining(r) > 0);
+    } else if (listFilterUnlinked) {
       displayList = mrs.filter(r => !r.bdgRef || !r.bdgRef.catKey);
     }
 
-    const filterBanner = listFilterUnlinked
+    const filterBanner = listFilterUnsplitOnly
+      ? `<div class="list-filter-banner" onclick="listFilterUnsplitOnly=false;render()">
+          <span>📥 只顯示待拆帳項目 · 共 ${displayList.length} 筆</span>
+          <span class="list-filter-close">✕ 取消</span>
+        </div>`
+      : listFilterUnlinked
       ? `<div class="list-filter-banner" onclick="listFilterUnlinked=false;render()">
           <span>🔍 只顯示未關聯預算的項目 · 共 ${displayList.length} 筆</span>
           <span class="list-filter-close">✕ 取消</span>
@@ -2258,7 +2638,9 @@
       : '';
 
     if (displayList.length === 0) {
-      lp.innerHTML = filterBanner + (listFilterUnlinked
+      lp.innerHTML = filterBanner + (listFilterUnsplitOnly
+        ? '<div class="empty"><div class="empty-ico">✅</div>沒有待拆帳的項目了！</div>'
+        : listFilterUnlinked
         ? '<div class="empty"><div class="empty-ico">✅</div>全部項目都已關聯預算了！</div>'
         : '<div class="empty"><div class="empty-ico">🌸</div>這個月還沒有記帳</div>');
       return;
@@ -2275,13 +2657,17 @@
       const isCollapsed = !!collapsed[date];
 
       const items = g[date].map(r => {
-        const c = CATS[r.cat] || CATS.daily;
+        const c = CATS[r.cat] || UNCATEGORIZED;
+        const isUnsplit = r.cat === UNSPLIT_KEY;
+        const remain = isUnsplit ? unsplitRemaining(r) : 0;
+        const isDone = isUnsplit && remain <= 0 && (r.splits||[]).length > 0;
+
         // icon 優先顯示已關聯的預算分類 icon
-        const displayIcon = (r.bdgRef && r.bdgRef.catKey && CATS[r.bdgRef.catKey])
+        const displayIcon = (!isUnsplit && r.bdgRef && r.bdgRef.catKey && CATS[r.bdgRef.catKey])
           ? CATS[r.bdgRef.catKey].icon
           : c.icon;
         let bdgTag = '';
-        if (r.bdgRef && r.bdgRef.catKey) {
+        if (!isUnsplit && r.bdgRef && r.bdgRef.catKey) {
           const rc = CATS[r.bdgRef.catKey];
           const plan = bdgPlan[r.bdgRef.catKey];
           if (rc && plan) {
@@ -2289,16 +2675,27 @@
             bdgTag = `<span class="ri-bdg-tag">${rc.icon} ${rc.lbl}${sub ? ' › '+sub.name : ''}</span>`;
           }
         }
-        return `<div class="ri${r.exempt ? ' exempt-row' : ''}">
-          <div class="ri-ico" style="cursor:pointer" onclick="openTreePicker(${r.id})" title="點擊關聯預算">${displayIcon}</div>
+        let unsplitTag = '';
+        if (isUnsplit) {
+          unsplitTag = isDone
+            ? `<span class="ri-bdg-tag ri-unsplit-done">已拆分完成</span>`
+            : `<span class="ri-bdg-tag ri-unsplit-tag">剩 $${remain.toLocaleString()} 未拆</span>`;
+        }
+
+        const rowClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
+        const iconClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
+
+        return `<div class="ri${r.exempt ? ' exempt-row' : ''}${isUnsplit ? ' ri-unsplit' : ''}">
+          <div class="ri-ico" style="cursor:pointer" onclick="${iconClick}" title="${isUnsplit ? '點擊拆分' : '點擊關聯預算'}">${displayIcon}</div>
           <div class="ri-info"
             oncontextmenu="return false"
-            style="-webkit-user-select:none;user-select:none;touch-action:manipulation"
+            style="-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer"
+            onclick="${rowClick}"
           >
             <div class="ri-note">${r.note ? esc(r.note) : c.lbl}</div>
-            <div class="ri-cat">${c.lbl}${bdgTag}</div>
+            <div class="ri-cat">${c.lbl}${bdgTag}${unsplitTag}</div>
           </div>
-          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="toggleExempt(${r.id})" title="點擊切換是否計入預算"><small>$</small>${r.amt.toLocaleString()}</div>
+          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="${isUnsplit ? rowClick : `toggleExempt(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊切換是否計入預算'}"><small>$</small>${r.amt.toLocaleString()}</div>
           <button class="ri-del" onclick="delRec(${r.id})">✕</button>
         </div>`;
       }).join('');
@@ -2325,18 +2722,34 @@
 
     const tv = {};
     CKEYS.forEach(k => { tv[k] = 0; });
+    let unsplitRemain = 0;
+    let uncategorizedTotal = 0;
     mrs.forEach(r => {
-      const key = CKEYS.includes(r.cat) ? r.cat : 'daily';
-      tv[key] += r.amt;
+      if (r.cat === UNSPLIT_KEY) {
+        // 待拆帳本身不計入一般分類統計；其拆分出去的部分計入對應分類
+        (r.splits || []).forEach(s => {
+          if (CKEYS.includes(s.cat)) tv[s.cat] += s.amt;
+          else uncategorizedTotal += s.amt;
+        });
+        unsplitRemain += unsplitRemaining(r);
+        return;
+      }
+      if (CKEYS.includes(r.cat)) {
+        tv[r.cat] += r.amt;
+      } else {
+        uncategorizedTotal += r.amt; // 分類已被刪除的舊紀錄
+      }
     });
 
     // 本月各細分類實際花費（透過 bdgRef）— 在展開時按需計算
     const segs = CKEYS.map((k, i) => {
       const pct = total > 0 ? (tv[k] / total * 100) : 0;
       return pct > 0
-        ? `<div class="stack-seg" style="width:${pct.toFixed(1)}%;background:${CAT_C[i]}"></div>`
+        ? `<div class="stack-seg" style="width:${pct.toFixed(1)}%;background:${catColor(i)}"></div>`
         : '';
-    }).join('');
+    }).join('') + (uncategorizedTotal > 0 && total > 0
+      ? `<div class="stack-seg" style="width:${(uncategorizedTotal/total*100).toFixed(1)}%;background:#c9bdb5"></div>`
+      : '');
 
     const sorted = [...CKEYS].sort((a, b) => tv[b] - tv[a]);
 
@@ -2372,32 +2785,47 @@
 
       return `<div class="cat-card" onclick="toggleAnaCard('${k}')" style="cursor:pointer">
         <div class="cat-card-top">
-          <div class="cat-dot" style="background:${CAT_C[i]}"></div>
+          <div class="cat-dot" style="background:${catColor(i)}"></div>
           <div class="cat-name">${c.icon} ${c.lbl}</div>
           <div class="cat-pct">${pct}%</div>
           <div class="cat-amt"><small>$</small>${v.toLocaleString()}</div>
           <span style="font-size:9px;color:var(--rose);margin-left:4px">${isOpen ? '▴' : '▾'}</span>
         </div>
-        <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${CAT_C[i]}"></div></div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${catColor(i)}"></div></div>
         ${isOpen ? `<div class="ana-subs-wrap">${subsHtml}</div>` : ''}
       </div>`;
-    }).join('');
+    }).join('') + (uncategorizedTotal > 0 ? `<div class="cat-card">
+        <div class="cat-card-top">
+          <div class="cat-dot" style="background:#c9bdb5"></div>
+          <div class="cat-name">🏷️ 未分類（分類已刪除）</div>
+          <div class="cat-pct">${total > 0 ? Math.round(uncategorizedTotal/total*100) : 0}%</div>
+          <div class="cat-amt"><small>$</small>${uncategorizedTotal.toLocaleString()}</div>
+        </div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${total>0?Math.round(uncategorizedTotal/total*100):0}%;background:#c9bdb5"></div></div>
+      </div>` : '');
 
     const legend = CKEYS
       .filter(k => tv[k] > 0)
       .map(k => {
         const i = CKEYS.indexOf(k);
         return `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${CAT_C[i]}"></span>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${catColor(i)}"></span>
           ${CATS[k].lbl}
         </span>`;
-      }).join('');
+      }).join('') + (uncategorizedTotal > 0 ? `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#c9bdb5"></span>
+          未分類
+        </span>` : '');
 
     ap.innerHTML = `
       <div class="ana-total">
         <div class="ana-total-label">本月支出</div>
         <div class="ana-total-num"><small>NT$</small>${total.toLocaleString()}</div>
       </div>
+      ${unsplitRemain > 0 ? `<div class="ana-unsplit-banner" onclick="goToUnsplitFilter()">
+        <span>📥 本月待拆帳尚有 <b>$${unsplitRemain.toLocaleString()}</b> 未分配</span>
+        <span class="ana-unsplit-go">前往明細 ›</span>
+      </div>` : ''}
       <div class="ana-stack-wrap">
         <div class="stack-bar">${segs}</div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:2px">${legend}</div>
@@ -2428,7 +2856,7 @@
     if (recs.length === 0) { toast('沒有資料可以匯出'); return; }
     const header = '日期,分類,金額,備註,不計入預算';
     const rows = recs.map(r => {
-      const c    = CATS[r.cat] || CATS.daily;
+      const c    = CATS[r.cat] || UNCATEGORIZED;
       const note = (r.note || '').replace(/,/g, '，').replace(/\n/g, ' ');
       return `${r.date},${c.lbl},${r.amt},${note},${r.exempt ? '是' : ''}`;
     });
@@ -2449,10 +2877,11 @@
   /* ── 備份 JSON（完整資料） ── */
   function backupJSON() {
     const payload = {
-      v: 2,
+      v: 3,
       ts: Date.now(),
       recs,
       bdgPlan,
+      catsList: CATS_LIST,
       labels: (() => { try { return JSON.parse(localStorage.getItem(SK_LBL) || '{}'); } catch(e) { return {}; } })(),
     };
     const json = JSON.stringify(payload);
@@ -2478,7 +2907,7 @@
     if (recs.length - lastCount >= AUTO_BACKUP_EVERY) {
       localStorage.setItem('kakeibo_last_backup_count', String(recs.length));
       // 靜默下載
-      const payload = { v: 2, ts: Date.now(), recs, bdgPlan };
+      const payload = { v: 3, ts: Date.now(), recs, bdgPlan, catsList: CATS_LIST };
       const json = JSON.stringify(payload);
       const blob = new Blob([json], { type: 'application/json' });
       const url  = URL.createObjectURL(blob);
@@ -2511,10 +2940,15 @@
         if (!ok) return;
         recs = data.recs;
         if (data.bdgPlan && typeof data.bdgPlan === 'object') bdgPlan = data.bdgPlan;
+        if (Array.isArray(data.catsList) && data.catsList.length > 0) CATS_LIST = data.catsList;
+        rebuildCats();
+        if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
         initBdgPlan();
         if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
         save();
         saveBdgPlan();
+        saveCats();
+        renderCatBtns();
         render();
         toast('✅ 已還原 ' + recs.length + ' 筆資料');
         closeBackupMenu();
@@ -2625,13 +3059,13 @@
   // PWA 生命週期：切換 App 或回桌面時強制寫入，防止 iOS 背景砍掉導致資料遺失
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      save(); saveLbl(); saveBdgPlan();
+      save(); saveCats(); saveBdgPlan();
     }
   });
 
   // 關閉分頁前最後寫入（補強 visibilitychange）
   window.addEventListener('beforeunload', () => {
-    save(); saveLbl(); saveBdgPlan();
+    save(); saveCats(); saveBdgPlan();
   });
 
   init();
