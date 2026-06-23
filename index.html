@@ -516,9 +516,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      /* 讓長按不觸發系統選單 */
+      /* 讓長按不觸發系統選單，但仍允許在捲動清單中垂直滑動 */
       -webkit-touch-callout: none;
-      touch-action: none;
+      touch-action: pan-y;
       position: relative;
     }
     .cbt.on      { background: var(--rose); border-color: var(--rose); box-shadow: 0 2px 8px rgba(220,160,160,0.4); }
@@ -1712,82 +1712,81 @@
 
   /* ── 長按偵測（touchstart / mousedown） ── */
   function setupLongPress() {
-    const grid       = document.getElementById('kbGrid');
-    let pressTimer   = null;
-    let pressedBtn   = null;
-    let didLongPress = false;
+    const grid = document.getElementById('kbGrid');
+    let pressTimer    = null;
+    let pressedBtn    = null;
+    let longPressFired = false;
+    let startX = 0, startY = 0;
+    const MOVE_THRESHOLD = 10; // px
 
-    // Double-tap detection for emoji picker
-    let lastTapTime  = 0;
-    let lastTapKey   = null;
+    // Double-tap detection for emoji picker (based on real click events)
+    let lastTapTime = 0;
+    let lastTapKey  = null;
 
-    const startPress = (btn) => {
-      didLongPress = false;
-      pressedBtn   = btn;
-      pressTimer   = setTimeout(() => {
-        didLongPress = true;
+    const clearPressTimer = () => {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    };
+
+    // 長按計時：只用來觸發「編輯分類」，完全不攔截/不影響原生點擊或捲動行為
+    const onPointerDown = (e) => {
+      const btn = e.target.closest('.cbt');
+      if (!btn) return;
+      longPressFired = false;
+      pressedBtn = btn;
+      const pt = e.touches ? e.touches[0] : e;
+      startX = pt.clientX;
+      startY = pt.clientY;
+      btn.classList.add('pressed');
+      pressTimer = setTimeout(() => {
+        longPressFired = true;
         btn.classList.remove('pressed');
         openRename(btn.dataset.c);
       }, 480);
     };
 
-    const cancelPress = () => {
-      clearTimeout(pressTimer);
-      pressTimer = null;
+    const onPointerMove = (e) => {
+      if (!pressTimer) return;
+      const pt = e.touches ? e.touches[0] : e;
+      if (Math.abs(pt.clientX - startX) > MOVE_THRESHOLD || Math.abs(pt.clientY - startY) > MOVE_THRESHOLD) {
+        if (pressedBtn) pressedBtn.classList.remove('pressed');
+        clearPressTimer();
+      }
     };
 
-    // Touch
-    grid.addEventListener('touchstart', e => {
+    const onPointerUp = () => {
+      if (pressedBtn) pressedBtn.classList.remove('pressed');
+      clearPressTimer();
+    };
+
+    // passive 監聽：完全不呼叫 preventDefault，瀏覽器原生捲動/點擊行為不受影響
+    grid.addEventListener('touchstart', onPointerDown, { passive: true });
+    grid.addEventListener('touchmove',  onPointerMove, { passive: true });
+    grid.addEventListener('touchend',   onPointerUp,   { passive: true });
+    grid.addEventListener('touchcancel', onPointerUp,  { passive: true });
+    grid.addEventListener('mousedown', onPointerDown);
+    grid.addEventListener('mousemove', onPointerMove);
+    grid.addEventListener('mouseup',   onPointerUp);
+    grid.addEventListener('mouseleave', onPointerUp);
+
+    // 點擊（分類選取 + 雙擊判斷）— 用原生 click，瀏覽器會自動正確區分「點擊」與「捲動」，不需要自己判斷
+    grid.addEventListener('click', e => {
       const btn = e.target.closest('.cbt');
       if (!btn) return;
-      startPress(btn);
-    }, { passive: true });
-
-    grid.addEventListener('touchend', e => {
-      const btn = e.target.closest('.cbt');
-      cancelPress();
-      if (btn && !didLongPress) {
-        e.preventDefault();
-        const now = Date.now();
-        const key = btn.dataset.c;
-        if (now - lastTapTime < 350 && lastTapKey === key) {
-          // double tap → emoji picker
-          lastTapTime = 0;
-          lastTapKey = null;
-          if (key !== UNSPLIT_KEY) openEmojiPicker(key);
-          return;
-        }
-        lastTapTime = now;
-        lastTapKey  = key;
-        btn.classList.add('pressed');
-        setTimeout(() => btn.classList.remove('pressed'), 90);
-        sc(btn.dataset.c);
+      if (longPressFired) { longPressFired = false; return; } // 長按已觸發改名，這次點擊不算選取
+      const key = btn.dataset.c;
+      const now = Date.now();
+      if (now - lastTapTime < 350 && lastTapKey === key) {
+        lastTapTime = 0;
+        lastTapKey = null;
+        if (key !== UNSPLIT_KEY) openEmojiPicker(key);
+        return;
       }
-    }, { passive: false });
-
-    grid.addEventListener('touchmove', () => cancelPress(), { passive: true });
-    grid.addEventListener('touchcancel', () => cancelPress(), { passive: true });
-
-    // Mouse (桌機)
-    grid.addEventListener('mousedown', e => {
-      const btn = e.target.closest('.cbt');
-      if (!btn) return;
-      startPress(btn);
+      lastTapTime = now;
+      lastTapKey  = key;
+      sc(key);
     });
 
-    grid.addEventListener('mouseup', e => {
-      const btn = e.target.closest('.cbt');
-      cancelPress();
-      if (btn && !didLongPress) sc(btn.dataset.c);
-    });
-
-    grid.addEventListener('dblclick', e => {
-      const btn = e.target.closest('.cbt');
-      if (!btn || btn.dataset.c === UNSPLIT_KEY) return;
-      openEmojiPicker(btn.dataset.c);
-    });
-
-    grid.addEventListener('mouseleave', () => cancelPress());
   }
 
   /* ── 未關聯過濾模式 ── */
@@ -2333,8 +2332,9 @@
     setupSwipe();
     setupMonthSwipe();
 
-    // 數字鍵盤：touchstart event delegation
-    const grid = document.getElementById('kbGrid');
+    // 數字鍵盤：touchstart event delegation（只綁在數字鍵區域，不要綁在整個 kbGrid，
+    // 否則 { passive:false } 會讓瀏覽器對右側可捲動分類清單也要等 JS 跑完才能決定要不要捲動，導致卡頓/無法捲動）
+    const grid = document.querySelector('.kb-numgrid');
     let delInterval = null;
     let delTimeout  = null;
 
