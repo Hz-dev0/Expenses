@@ -2645,9 +2645,11 @@
       delTimeout = delInterval = null;
     };
 
-    // 統一用 pointerdown 處理觸控和滑鼠，瀏覽器保證每次點擊只觸發一次
+    // pointerdown 統一處理觸控與滑鼠，用 pointerType 避免重複觸發
+    let kbHasTouch = false;
     grid.addEventListener('pointerdown', e => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.pointerType === 'touch') kbHasTouch = true;
+      if (e.pointerType === 'mouse' && kbHasTouch) return; // 觸控後的合成 mouse 事件，忽略
       const btn = e.target.closest('[data-n],[data-del],[data-ok]');
       if (!btn) return;
       e.preventDefault();
@@ -2657,8 +2659,8 @@
       else if (btn.dataset.del !== undefined) startDel();
       else if (btn.dataset.ok  !== undefined) addRec();
     }, { passive: false });
-    grid.addEventListener('pointerup',    e => { if (e.target.closest('[data-del]')) stopDel(); });
-    grid.addEventListener('pointercancel',e => { if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointerup',    e => { kbHasTouch = false; if (e.target.closest('[data-del]')) stopDel(); });
+    grid.addEventListener('pointercancel',e => { kbHasTouch = false; if (e.target.closest('[data-del]')) stopDel(); });
     grid.addEventListener('mouseleave',   e => { if (delInterval || delTimeout) stopDel(); });
 
     // Rename Modal 按鈕
@@ -2678,7 +2680,6 @@
 
   /* ── 數字輸入 ── */
   function ni(v) {
-    console.trace('ni called with: ' + v);
     if (inp.length >= 6) return;
     if (v === '0' && inp === '') return;
     inp += v;
