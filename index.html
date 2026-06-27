@@ -1624,12 +1624,16 @@
   const save = () => {
     const v = JSON.stringify(recs);
     let lsOk = false;
-    idbSet(SK, v).catch(() => {});
-    try { localStorage.setItem(SK, v); lsOk = true; } catch(e) {}
-    // 兩邊都寫不進去才警告（idbSet 失敗已在 idbSet 內 console.error）
-    if (!lsOk) {
-      console.error('[save] localStorage also failed — storage may be full');
-      toast('⚠️ 儲存失敗！請立即匯出備份');
+    // 同時追蹤 IDB（主要）和 localStorage（備份），兩邊都失敗才警告
+    idbSet(SK, v).catch(() => {
+      // IDB 失敗時，確認 localStorage 是否也已失敗
+      if (!lsOk) {
+        console.error('[save] Both IDB and localStorage failed — storage may be full');
+        toast('⚠️ 儲存失敗！請立即匯出備份');
+      }
+    });
+    try { localStorage.setItem(SK, v); lsOk = true; } catch(e) {
+      lsOk = false;
     }
   };
   const saveCats = () => {
@@ -2848,7 +2852,10 @@
     const state = _lpTimers.get(el);
     // 如果是剛完成長按（timer 已被設為 null），不執行短按
     if (state === null) { _lpTimers.delete(el); return; }
-    eval(el.dataset.tap);
+    const id     = parseInt(el.dataset.id);
+    const action = el.dataset.action;
+    if (action === 'split')  openSplitModal(id);
+    else                     openTreePicker(id);
   }
 
   /* ── 編輯備註 ── */
@@ -2894,6 +2901,8 @@
     if (vm > 11) { vm = 0; vy++; }
     if (vm < 0)  { vm = 11; vy--; }
     collapsed = {};
+    // 切換月份時同步清空分析頁展開狀態，行為與折疊狀態一致
+    Object.keys(anaOpen).forEach(k => delete anaOpen[k]);
     const cls = d > 0 ? 'slide-in-right' : 'slide-in-left';
     const panel = ctab === 'list' ? document.getElementById('listPanel') : document.getElementById('anaPanel');
     render();
@@ -3067,15 +3076,14 @@
         const plainLbl = linkedCat ? '' : c.lbl;
         const noteFallbackLbl = linkedCat ? linkedCat.lbl : c.lbl;
 
-        const rowClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
-        const iconClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
+        const rowAction = isUnsplit ? 'split' : 'tree';
 
         return `<div class="ri${r.exempt ? ' exempt-row' : ''}${isUnsplit ? ' ri-unsplit' : ''}">
           <div class="ri-ico" style="cursor:pointer" onclick="${iconClick}" title="${isUnsplit ? '點擊拆分' : '點擊關聯預算'}">${displayIcon}</div>
           <div class="ri-info"
             oncontextmenu="openEditNote(${r.id});return false"
             style="-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer"
-            data-tap="${rowClick}"
+            data-action="${rowAction}"
             data-id="${r.id}"
             ontouchstart="riLongPressStart(event,this)"
             ontouchend="riLongPressEnd(event,this)"
@@ -3086,7 +3094,7 @@
             <div class="ri-note">${r.note ? esc(r.note) : noteFallbackLbl}</div>
             <div class="ri-cat">${plainLbl}${bdgTag}${unsplitTag}</div>
           </div>
-          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="${isUnsplit ? rowClick : `toggleExempt(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊切換是否計入預算'}"><small>$</small>${r.amt.toLocaleString()}</div>
+          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="${isUnsplit ? `openSplitModal(${r.id})` : `toggleExempt(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊切換是否計入預算'}"><small>$</small>${r.amt.toLocaleString()}</div>
           <button class="ri-del" onclick="delRec(${r.id})">✕</button>
         </div>`;
       }).join('');
@@ -3409,12 +3417,16 @@
         render();
         closeBackupMenu();
 
-        // 批次上傳所有 recs 到 Firebase
-        toast('⏫ 正在同步到 Firebase…');
+        // 批次上傳所有 recs 到 Firebase，顯示即時進度
+        const total = recs.length;
         let uploaded = 0;
         for (const r of recs) {
           await fbSyncRec(r);
           uploaded++;
+          // 每 5 筆或最後一筆更新一次 toast，避免更新過於頻繁
+          if (uploaded % 5 === 0 || uploaded === total) {
+            toast(`⏫ 同步中… ${uploaded} / ${total} 筆`);
+          }
         }
         await fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan));
         await fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST));
@@ -3462,6 +3474,7 @@
     const prevVm = vm, prevVy = vy;
     vy = mpYear; vm = m;
     collapsed = {};
+    Object.keys(anaOpen).forEach(k => delete anaOpen[k]);
     closeMp();
     const direction = (vy > prevVy || (vy === prevVy && vm > prevVm)) ? 1 : -1;
     const cls = direction > 0 ? 'slide-in-right' : 'slide-in-left';
