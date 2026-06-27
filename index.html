@@ -1979,6 +1979,9 @@
 
     grid.addEventListener('touchend', endPress, { passive: true });
     grid.addEventListener('touchcancel', endPress, { passive: true });
+    // 觸控結束後短暫標記，防止合成 mouse 事件重複觸發；500ms 後重置，讓滑鼠可繼續使用
+    grid.addEventListener('touchend',    () => { setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
+    grid.addEventListener('touchcancel', () => { setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
 
     // Mouse（桌機；若裝置剛觸發過 touch，忽略合成滑鼠事件避免重複）
     grid.addEventListener('mousedown', e => {
@@ -2037,9 +2040,7 @@
     btn.addEventListener('touchcancel', () => { clearTimeout(timer); timer = null; }, { passive: true });
   }
 
-  function riLongPressStart() {}
-  function riLongPressMove() {}
-  function riLongPressEnd() {}
+
   /* 結構: bdgPlan[catKey] = { budget, subs:[{id,name,budget}], open } */
   const SK_BDGPLAN = 'kakeibo_bdgplan';
   let bdgPlan = {}; // keyed by catKey
@@ -3222,7 +3223,7 @@
   function toggleAnaCard(k) {
     anaOpen[k] = !anaOpen[k];
     const mrs = getMrs();
-    const displayMrs = mrs;
+    const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
     const displayTotal = displayMrs.reduce((s, r) => s + r.amt, 0);
     renderAna(displayMrs, displayTotal);
   }
@@ -3375,21 +3376,39 @@
         const data = JSON.parse(text);
         if (!data.recs || !Array.isArray(data.recs)) throw new Error('格式錯誤');
         // 確認
-        const ok = confirm(`還原備份？\n共 ${data.recs.length} 筆記錄\n備份時間：${data.ts ? new Date(data.ts).toLocaleString() : '未知'}\n\n⚠️ 這會覆蓋目前所有資料！`);
+        const ok = confirm(`還原備份？\n共 ${data.recs.length} 筆記錄\n備份時間：${data.ts ? new Date(data.ts).toLocaleString() : '未知'}\n\n備份資料將與雲端合併，兩邊記錄都會保留。`);
         if (!ok) return;
-        recs = data.recs;
+
+        // 先從 Firebase 載入雲端最新資料
+        toast('☁️ 正在讀取雲端資料…');
+        await fbLoadAll();
+
+        // 合併：以 id 為 key，雲端優先（雲端是最新的），備份檔補上雲端沒有的
+        const merged = new Map();
+        recs.forEach(r => merged.set(r.id, r));         // 先放雲端資料
+        data.recs.forEach(r => {
+          if (!merged.has(r.id)) merged.set(r.id, r);   // 備份檔只補雲端沒有的
+        });
+        recs = [...merged.values()].sort((a, b) => b.id - a.id);
+
         if (data.bdgPlan && typeof data.bdgPlan === 'object') bdgPlan = data.bdgPlan;
         if (Array.isArray(data.catsList) && data.catsList.length > 0) CATS_LIST = data.catsList;
         rebuildCats();
         if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
         initBdgPlan();
-        if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
+
+        // 用比所有現有 id 都大的值當 _nextId，避免衝突
+        _nextId = recs.length > 0
+          ? Math.max(Date.now(), Math.max(...recs.map(r => r.id)) + 1)
+          : Date.now();
+
         save();
         saveBdgPlan();
         saveCats();
         renderCatBtns();
         render();
         closeBackupMenu();
+
         // 批次上傳所有 recs 到 Firebase
         toast('⏫ 正在同步到 Firebase…');
         let uploaded = 0;
@@ -3399,7 +3418,7 @@
         }
         await fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan));
         await fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST));
-        toast('✅ 已還原並同步 ' + uploaded + ' 筆到 Firebase');
+        toast('✅ 已合併並同步 ' + uploaded + ' 筆到 Firebase');
       } catch(err) {
         toast('❌ 還原失敗：' + err.message);
       }
