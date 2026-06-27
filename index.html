@@ -2415,20 +2415,23 @@
     const subName = (_splitSelSub !== null && bdgPlan[_splitSelCat])
       ? (bdgPlan[_splitSelCat].subs.find(s => s.id === _splitSelSub) || {}).name || '' : '';
     const catLabel = CATS[_splitSelCat].lbl + (subName ? ' › ' + subName : '');
-    const newRec = { id: _nextId++, date: r.date, cat: _splitSelCat, amt: v, note: r.note || '' };
+    const now = Date.now();
+    const newRec = { id: _nextId++, date: r.date, cat: _splitSelCat, amt: v, note: r.note || '', updatedAt: now };
     if (_splitSelSub !== null) newRec.bdgRef = { catKey: _splitSelCat, subId: _splitSelSub };
     recs.push(newRec);
 
     // 扣減原始待拆帳金額
     r.amt = Math.round((r.amt - v) * 100) / 100;
+    r.updatedAt = now;
 
     // 若已全部拆完，軟刪除原始待拆帳紀錄並關閉
     if (r.amt <= 0) {
-      r.deleted = true;
-      r.deletedAt = Date.now();
+      r.deleted   = true;
+      r.deletedAt = now;
+      r.updatedAt = now;
       save();
       fbSyncRec(newRec);
-      fbSyncRec(r);   // 把 deleted 標記推上雲端
+      fbSyncRec(r);
       toast('🎉 已全部拆分完成！');
       closeSplitModal();
       return;
@@ -2508,6 +2511,7 @@
       const sub  = subId !== undefined ? plan.subs.find(s => s.id === subId) : null;
       toast('已關聯：' + c.icon + ' ' + c.lbl + (sub ? ' › ' + sub.name : ''));
     }
+    rec.updatedAt = Date.now();
     save();
     if (rec) fbSyncRec(rec);
     render();
@@ -2527,29 +2531,33 @@
   window._fbLoadAndInit = async () => {
     // 先讀本地資料
     await loadAll();
-    const recsBefore = [...recs];
+    const localMap = new Map(recs.map(r => [r.id, r]));
 
     // 再讀雲端
     await fbLoadAll();
+    const cloudMap = new Map(recs.map(r => [r.id, r]));
 
-    // 合併：以 id 為 key，兩邊都有的以 deletedAt 較新者為準（確保刪除能正確傳播）
-    // 其中一邊沒有的直接補入（但若本地標記 deleted 的不補）
+    // 合併：每筆都比 updatedAt，誰新誰贏
+    // 沒有 updatedAt 的舊資料（升級前已存在）視為 updatedAt = 0，雲端優先
     const merged = new Map();
-    recs.forEach(r => merged.set(r.id, r));  // 先放雲端
-    recsBefore.forEach(local => {
-      if (!merged.has(local.id)) {
-        // 雲端沒有這筆：只有本地已刪的不補（避免把刪掉的復活）
-        if (!local.deleted) merged.set(local.id, local);
+
+    // 先把雲端全部放入
+    cloudMap.forEach((r, id) => merged.set(id, r));
+
+    // 再看本地，若本地比雲端新則覆蓋；若雲端沒有則補入
+    localMap.forEach((local, id) => {
+      if (!merged.has(id)) {
+        // 雲端沒有這筆 → 補入（不管是否 deleted，讓雲端也知道這筆被刪了）
+        merged.set(id, local);
       } else {
-        // 兩邊都有：若本地標記 deleted 且比雲端版本更新，以本地 deleted 為準
-        const cloud = merged.get(local.id);
-        if (local.deleted && (!cloud.deleted || (local.deletedAt || 0) > (cloud.deletedAt || 0))) {
-          merged.set(local.id, local);
-        }
+        const cloud = merged.get(id);
+        const localTs = local.updatedAt || 0;
+        const cloudTs = cloud.updatedAt || 0;
+        if (localTs > cloudTs) merged.set(id, local); // 本地比較新
       }
     });
-    recs = [...merged.values()].sort((a, b) => b.id - a.id);
 
+    recs = [...merged.values()].sort((a, b) => b.id - a.id);
     await init();
   };
 
@@ -2781,7 +2789,7 @@
     if (!dv) { toast('請選日期'); return; }
 
     const note = document.getElementById('noteInp').value.trim();
-    const newRec = { id: _nextId++, date: dv, cat, amt, note };
+    const newRec = { id: _nextId++, date: dv, cat, amt, note, updatedAt: Date.now() };
     recs.unshift(newRec);
     save();
     fbSyncRec(newRec);
@@ -2802,6 +2810,7 @@
     const r = recs.find(r => r.id === id);
     if (!r) return;
     r.exempt = !r.exempt;
+    r.updatedAt = Date.now();
     save();
     fbSyncRec(r);
     render();
@@ -2903,6 +2912,7 @@
     const r = recs.find(r => r.id === _editNoteRecId);
     if (!r) { closeEditNote(); return; }
     r.note = document.getElementById('editNoteInp').value.trim();
+    r.updatedAt = Date.now();
     save();
     fbSyncRec(r);
     render();
@@ -2914,10 +2924,11 @@
   function delRec(id) {
     const r = recs.find(r => r.id === id);
     if (!r) return;
-    r.deleted = true;
+    r.deleted   = true;
     r.deletedAt = Date.now();
+    r.updatedAt = r.deletedAt;
     save();
-    fbSyncRec(r);   // 把 deleted 標記推上雲端，不用 fbDeleteRec
+    fbSyncRec(r);
     render();
   }
 
