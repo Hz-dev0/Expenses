@@ -3387,18 +3387,25 @@
         const ok = confirm(`還原備份？\n共 ${data.recs.length} 筆記錄\n備份時間：${data.ts ? new Date(data.ts).toLocaleString() : '未知'}\n\n備份資料將與雲端合併，兩邊記錄都會保留。`);
         if (!ok) return;
 
-        // 先從 Firebase 載入雲端最新資料
+        // 先從 Firebase 讀取雲端資料（暫存，不覆蓋現有 recs）
         toast('☁️ 正在讀取雲端資料…');
-        await fbLoadAll();
+        let cloudRecs = [];
+        try {
+          if (window._fb && window._fbUser) {
+            const { db, collection, getDocs } = window._fb;
+            const snap = await getDocs(collection(db, 'users', window._fbUser.uid, 'recs'));
+            if (!snap.empty) cloudRecs = snap.docs.map(d => d.data());
+          }
+        } catch(e) { console.error('[restore] fbLoad failed', e); }
 
-        // 合併：以 id 為 key，雲端優先（雲端是最新的），備份檔補上雲端沒有的
-        const newRecs  = [];                             // 只記錄備份檔裡雲端沒有的
-        const merged   = new Map();
-        recs.forEach(r => merged.set(r.id, r));
+        // 合併：以 id 為 key，雲端優先，備份檔補上雲端沒有的
+        const newRecs = [];
+        const merged  = new Map();
+        cloudRecs.forEach(r => merged.set(r.id, r));
         data.recs.forEach(r => {
           if (!merged.has(r.id)) {
             merged.set(r.id, r);
-            newRecs.push(r);                             // 這些才需要上傳到 Firebase
+            newRecs.push(r);
           }
         });
         recs = [...merged.values()].sort((a, b) => b.id - a.id);
