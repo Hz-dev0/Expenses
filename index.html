@@ -3392,10 +3392,14 @@
         await fbLoadAll();
 
         // 合併：以 id 為 key，雲端優先（雲端是最新的），備份檔補上雲端沒有的
-        const merged = new Map();
-        recs.forEach(r => merged.set(r.id, r));         // 先放雲端資料
+        const newRecs  = [];                             // 只記錄備份檔裡雲端沒有的
+        const merged   = new Map();
+        recs.forEach(r => merged.set(r.id, r));
         data.recs.forEach(r => {
-          if (!merged.has(r.id)) merged.set(r.id, r);   // 備份檔只補雲端沒有的
+          if (!merged.has(r.id)) {
+            merged.set(r.id, r);
+            newRecs.push(r);                             // 這些才需要上傳到 Firebase
+          }
         });
         recs = [...merged.values()].sort((a, b) => b.id - a.id);
 
@@ -3417,20 +3421,23 @@
         render();
         closeBackupMenu();
 
-        // 批次上傳所有 recs 到 Firebase，顯示即時進度
-        const total = recs.length;
-        let uploaded = 0;
-        for (const r of recs) {
-          await fbSyncRec(r);
-          uploaded++;
-          // 每 5 筆或最後一筆更新一次 toast，避免更新過於頻繁
-          if (uploaded % 5 === 0 || uploaded === total) {
-            toast(`⏫ 同步中… ${uploaded} / ${total} 筆`);
+        // 只上傳備份檔裡有、雲端沒有的筆數
+        if (newRecs.length > 0) {
+          const total = newRecs.length;
+          let uploaded = 0;
+          for (const r of newRecs) {
+            await fbSyncRec(r);
+            uploaded++;
+            if (uploaded % 5 === 0 || uploaded === total) {
+              toast(`⏫ 同步中… ${uploaded} / ${total} 筆`);
+            }
           }
+          await fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan));
+          await fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST));
+          toast(`✅ 已補上 ${newRecs.length} 筆到 Firebase`);
+        } else {
+          toast('✅ 備份與雲端已完全一致，無需同步');
         }
-        await fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan));
-        await fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST));
-        toast('✅ 已合併並同步 ' + uploaded + ' 筆到 Firebase');
       } catch(err) {
         toast('❌ 還原失敗：' + err.message);
       }
