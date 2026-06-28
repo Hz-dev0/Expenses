@@ -2240,10 +2240,13 @@
 
   function delBdgSub(k, sid) {
     bdgPlan[k].subs = bdgPlan[k].subs.filter(s => s.id !== sid);
-    // 將有此細分類關聯的支出改為只關聯父項
+    // 將有此細分類關聯的支出改為只關聯父項，並同步更新時間戳記和 Firebase
+    const now = Date.now();
     recs.forEach(r => {
       if (r.bdgRef && r.bdgRef.catKey === k && r.bdgRef.subId === sid) {
         delete r.bdgRef.subId;
+        r.updatedAt = now;
+        fbSyncRec(r);
       }
     });
     save();
@@ -2601,11 +2604,14 @@
     // 從現有資料的最大 id 繼續，避免重複
     if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
 
-    // 資料重置偵測：若上次有記帳但這次 recs 是空的，警告可能被系統清除
+    // 資料重置偵測：延遲到 Firebase 載入完成後再判斷（避免登入前 recs 為空時誤報）
     const SK_LAST = 'kakeibo_last_open';
     const lastHadData = localStorage.getItem(SK_LAST) === '1';
-    if (lastHadData && recs.length === 0) {
-      setTimeout(() => toast('⚠️ 偵測到資料可能被清除，請確認或匯入備份'), 500);
+    if (lastHadData && recs.length === 0 && !window._fbUser) {
+      // 只有在確定不是等待 Firebase 的狀況下才警告
+      setTimeout(() => {
+        if (recs.length === 0) toast('⚠️ 偵測到資料可能被清除，請確認或匯入備份');
+      }, 3000); // 給 Firebase 3 秒登入時間，若還是空的才警告
     }
     try { localStorage.setItem(SK_LAST, recs.length > 0 ? '1' : '0'); } catch(e) {}
 
@@ -2965,16 +2971,13 @@
   }
 
   /* ── 切換 Tab ── */
-  function goTab(t, dir) {
+  function goTab(t) {
     if (ctab === t) return;
     ctab = t;
     document.getElementById('tabList').classList.toggle('on', t === 'list');
     document.getElementById('tabAna').classList.toggle('on', t === 'ana');
     document.getElementById('tabBdgPlan').classList.toggle('on', t === 'bdgplan');
-    const wrap = document.getElementById('panelWrap');
-    if (t === 'list')      wrap.style.transform = 'translateX(0)';
-    else if (t === 'ana')  wrap.style.transform = 'translateX(-33.333%)';
-    else                   wrap.style.transform = 'translateX(-66.666%)';
+    // transform 由 render() 統一設定，這裡不重複設
     render();
   }
 
