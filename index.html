@@ -2983,8 +2983,14 @@
     document.getElementById('tabList').classList.toggle('on', t === 'list');
     document.getElementById('tabAna').classList.toggle('on', t === 'ana');
     document.getElementById('tabBdgPlan').classList.toggle('on', t === 'bdgplan');
-    // transform 由 render() 統一設定，這裡不重複設
-    render();
+    // 先更新 transform（讓動畫立即啟動），下一幀才渲染內容（避免阻塞動畫）
+    const wrap = document.getElementById('panelWrap');
+    if (wrap) {
+      if (t === 'list')     wrap.style.transform = 'translateX(0)';
+      else if (t === 'ana') wrap.style.transform = 'translateX(-33.333%)';
+      else                  wrap.style.transform = 'translateX(-66.666%)';
+    }
+    requestAnimationFrame(() => render());
   }
 
   /* ── 折疊日期群組 ── */
@@ -3031,7 +3037,7 @@
 
     const displayTotal = showBudgetTotal ? budgetTotal : total;
 
-    // 預算超出判斷（永遠以 budgetTotal 為準）
+    // 預算超出判斷
     if (budget > 0 && budgetTotal > budget) {
       const diff = budgetTotal - budget;
       tNum.textContent = showBudgetTotal ? ('-' + diff.toLocaleString()) : total.toLocaleString();
@@ -3051,16 +3057,11 @@
       }
     }
 
-    // ensure correct panel visible
-    const wrap = document.getElementById('panelWrap');
-    if (wrap) {
-      if (ctab === 'list')     wrap.style.transform = 'translateX(0)';
-      else if (ctab === 'ana') wrap.style.transform = 'translateX(-33.333%)';
-      else                     wrap.style.transform = 'translateX(-66.666%)';
-    }
-    renderList(showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs, mrs);
-    renderAna(showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs, displayTotal);
-    renderBdgPlan();
+    // 只渲染當前 tab，避免切換時三個 panel 同時重繪造成卡頓
+    const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
+    if (ctab === 'list')     renderList(displayMrs, mrs);
+    else if (ctab === 'ana') renderAna(displayMrs, displayTotal);
+    else                     renderBdgPlan();
   }
 
   /* ── 列表渲染 ── */
