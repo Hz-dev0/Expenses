@@ -1480,6 +1480,13 @@
 <div id="backupMenuOverlay" style="display:none;position:fixed;inset:0;background:rgba(74,58,58,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:400;align-items:flex-end;justify-content:center">
   <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
     <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:16px">備份 & 還原</div>
+    <button onclick="forceLoadFromCloud()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
+      <span style="font-size:22px">☁️</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text)">從雲端強制讀取</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">直接從 Firebase 拉取資料，覆蓋本地</div>
+      </div>
+    </button>
     <button onclick="backupJSON()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
       <span style="font-size:22px">✂️</span>
       <div>
@@ -3509,6 +3516,33 @@
   }
 
   /* ── 備份選單 ── */
+  async function forceLoadFromCloud() {
+    if (!window._fb || !window._fbUser) {
+      toast('⚠️ 請先登入 Google 帳號');
+      return;
+    }
+    const ok = confirm('從 Firebase 強制讀取資料？\n本地資料將被雲端覆蓋。');
+    if (!ok) return;
+    toast('☁️ 正在從雲端讀取…');
+    try {
+      const { db, collection, getDocs } = window._fb;
+      const snap = await getDocs(collection(db, 'users', window._fbUser.uid, 'recs'));
+      if (snap.empty) {
+        toast('⚠️ 雲端沒有資料');
+        return;
+      }
+      recs = snap.docs.map(d => d.data());
+      recs.sort((a, b) => b.id - a.id);
+      _nextId = recs.length > 0 ? Math.max(Date.now(), Math.max(...recs.map(r => r.id)) + 1) : Date.now();
+      save();
+      render();
+      closeBackupMenu();
+      toast('✅ 已從雲端讀取 ' + recs.length + ' 筆資料');
+    } catch(e) {
+      toast('❌ 讀取失敗：' + e.message);
+    }
+  }
+
   function openBackupMenu() {
     const el = document.getElementById('backupMenuOverlay');
     el.style.display = 'flex';
