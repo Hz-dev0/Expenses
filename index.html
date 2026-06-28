@@ -3131,7 +3131,7 @@
         const rowAction = isUnsplit ? 'split' : 'tree';
 
         return `<div class="ri${r.exempt ? ' exempt-row' : ''}${isUnsplit ? ' ri-unsplit' : ''}">
-          <div class="ri-ico" style="cursor:pointer" onclick="${iconClick}" title="${isUnsplit ? '點擊拆分' : '點擊關聯預算'}">${displayIcon}</div>
+          <div class="ri-ico" style="cursor:pointer" onclick="${isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊關聯預算'}">${displayIcon}</div>
           <div class="ri-info"
             oncontextmenu="openEditNote(${r.id});return false"
             style="-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer"
