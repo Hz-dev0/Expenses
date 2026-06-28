@@ -3602,26 +3602,90 @@
   function setupSwipe() {
     const area = document.getElementById('scrollArea');
     const tabOrder = ['list', 'ana', 'bdgplan'];
-    let sx = 0, sy = 0, tracking = false;
+    let sx = 0, sy = 0, tracking = false, dirLocked = false, isHoriz = false;
+
+    const wrap = () => document.getElementById('panelWrap');
+
+    // 目前 tab 對應的 translateX 基準值
+    const baseX = () => {
+      const idx = tabOrder.indexOf(ctab);
+      return -idx * 33.333;
+    };
 
     area.addEventListener('touchstart', e => {
       sx = e.touches[0].clientX;
       sy = e.touches[0].clientY;
       tracking = true;
+      dirLocked = false;
+      isHoriz = false;
+      const w = wrap();
+      if (w) w.style.transition = 'none'; // 滑動中關掉 transition，讓它直接跟手
     }, { passive: true });
 
-    area.addEventListener('touchend', e => {
+    area.addEventListener('touchmove', e => {
+      if (!tracking) return;
+      const dx = e.touches[0].clientX - sx;
+      const dy = e.touches[0].clientY - sy;
+
+      // 第一次移動時判斷方向，之後鎖定
+      if (!dirLocked) {
+        if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        isHoriz = Math.abs(dx) > Math.abs(dy);
+        dirLocked = true;
+      }
+      if (!isHoriz) return;
+
+      const idx = tabOrder.indexOf(ctab);
+      // 邊界阻尼：第一頁往右滑或最後頁往左滑，移動量減半
+      const atLeft  = idx === 0 && dx > 0;
+      const atRight = idx === tabOrder.length - 1 && dx < 0;
+      const move    = (atLeft || atRight) ? dx * 0.25 : dx;
+
+      // 換算成 % （panelWrap 是 3 倍寬，每格 33.333%）
+      const screenW = area.offsetWidth || window.innerWidth;
+      const movePct = (move / screenW) * 33.333;
+      const w = wrap();
+      if (w) w.style.transform = `translateX(${baseX() + movePct}%)`;
+    }, { passive: true });
+
+    const endSwipe = e => {
       if (!tracking) return;
       tracking = false;
-      const dx = e.changedTouches[0].clientX - sx;
-      const dy = e.changedTouches[0].clientY - sy;
-      if (Math.abs(dx) < 30 || Math.abs(dy) > Math.abs(dx)) return;
-      const idx = tabOrder.indexOf(ctab);
-      if (dx < 0 && idx < tabOrder.length - 1) goTab(tabOrder[idx + 1]);
-      else if (dx > 0 && idx > 0) goTab(tabOrder[idx - 1]);
-    }, { passive: true });
+      const w = wrap();
+      if (w) w.style.transition = ''; // 恢復 transition
 
-    area.addEventListener('touchcancel', () => { tracking = false; }, { passive: true });
+      if (!isHoriz) {
+        // 非水平滑動，還原位置
+        if (w) w.style.transform = `translateX(${baseX()}%)`;
+        return;
+      }
+
+      const dx = (e.changedTouches[0]?.clientX ?? sx) - sx;
+      const dy = (e.changedTouches[0]?.clientY ?? sy) - sy;
+      const screenW = area.offsetWidth || window.innerWidth;
+
+      // 超過 20% 螢幕寬或快速滑（速度難量，用距離判斷）才切換
+      const threshold = screenW * 0.2;
+      const idx = tabOrder.indexOf(ctab);
+      if (dx < -threshold && idx < tabOrder.length - 1) {
+        goTab(tabOrder[idx + 1]);
+      } else if (dx > threshold && idx > 0) {
+        goTab(tabOrder[idx - 1]);
+      } else {
+        // 沒超過門檻，彈回原位
+        if (w) w.style.transform = `translateX(${baseX()}%)`;
+      }
+    };
+
+    area.addEventListener('touchend',    endSwipe, { passive: true });
+    area.addEventListener('touchcancel', e => {
+      tracking = false;
+      const w = wrap();
+      if (w) {
+        w.style.transition = '';
+        w.style.transform  = `translateX(${baseX()}%)`;
+      }
+    }, { passive: true });
   }
 
   /* ── Swipe on top bar for month ── */
