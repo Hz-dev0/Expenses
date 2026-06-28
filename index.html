@@ -2533,28 +2533,32 @@
     await loadAll();
     const localMap = new Map(recs.map(r => [r.id, r]));
 
-    // 再讀雲端（fbLoadAll 會直接覆寫 recs）
-    await fbLoadAll();
+    // 讀雲端（現在回傳資料，不覆寫 recs）
+    const cloudRecs = await fbLoadAll();
 
-    // 本地沒有資料 → 直接用雲端，不做合併（避免空的 localMap 蓋掉雲端）
+    // 雲端沒資料 → 直接用本地
+    if (cloudRecs.length === 0) {
+      await init();
+      return;
+    }
+
+    // 本地沒資料 → 直接用雲端
     if (localMap.size === 0) {
+      recs = cloudRecs;
       await init();
       return;
     }
 
     // 兩邊都有資料 → 以 updatedAt 為準合併，誰新誰贏
-    const cloudMap = new Map(recs.map(r => [r.id, r]));
+    const cloudMap = new Map(cloudRecs.map(r => [r.id, r]));
     const merged   = new Map();
 
-    // 先放雲端
     cloudMap.forEach((r, id) => merged.set(id, r));
-
-    // 本地若比雲端新則覆蓋；雲端沒有的補入
     localMap.forEach((local, id) => {
       if (!merged.has(id)) {
         merged.set(id, local);
       } else {
-        const cloud  = merged.get(id);
+        const cloud   = merged.get(id);
         const localTs = local.updatedAt || 0;
         const cloudTs = cloud.updatedAt || 0;
         if (localTs > cloudTs) merged.set(id, local);
@@ -3374,18 +3378,19 @@
   }
 
   async function fbLoadAll() {
-    if (!window._fb || !window._fbUser) return;
+    if (!window._fb || !window._fbUser) return [];
     const { db, collection, getDocs, doc, getDoc } = window._fb;
     const uid = window._fbUser.uid;
-    // 讀取 recs
+    // 讀取 recs — 只回傳，不覆寫全域 recs
+    let cloudRecs = [];
     try {
       const snap = await getDocs(collection(db, 'users', uid, 'recs'));
       if (!snap.empty) {
-        recs = snap.docs.map(d => d.data());
-        recs.sort((a, b) => b.id - a.id);
+        cloudRecs = snap.docs.map(d => d.data());
+        cloudRecs.sort((a, b) => b.id - a.id);
       }
     } catch(e) { console.error('[FB] loadRecs failed', e); }
-    // 讀取 meta（分類、預算等）
+    // 讀取 meta（分類、預算等）— 這些仍直接套用，沒有衝突問題
     const metaKeys = [SK_CATS, SK_BDG, SK_MODE, SK_BDGPLAN];
     for (const k of metaKeys) {
       try {
@@ -3411,6 +3416,7 @@
         }
       } catch(e) { console.error('[FB] loadMeta failed', k, e); }
     }
+    return cloudRecs;
   }
 
   /* ── 還原 JSON ── */
