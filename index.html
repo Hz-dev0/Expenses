@@ -1480,13 +1480,6 @@
 <div id="backupMenuOverlay" style="display:none;position:fixed;inset:0;background:rgba(74,58,58,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:400;align-items:flex-end;justify-content:center">
   <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
     <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:16px">備份 & 還原</div>
-    <button onclick="forceLoadFromCloud()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
-      <span style="font-size:22px">☁️</span>
-      <div>
-        <div style="font-size:13px;font-weight:700;color:var(--text)">從雲端強制讀取</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">直接從 Firebase 拉取資料，覆蓋本地</div>
-      </div>
-    </button>
     <button onclick="backupJSON()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
       <span style="font-size:22px">✂️</span>
       <div>
@@ -1631,16 +1624,12 @@
   const save = () => {
     const v = JSON.stringify(recs);
     let lsOk = false;
-    // 同時追蹤 IDB（主要）和 localStorage（備份），兩邊都失敗才警告
-    idbSet(SK, v).catch(() => {
-      // IDB 失敗時，確認 localStorage 是否也已失敗
-      if (!lsOk) {
-        console.error('[save] Both IDB and localStorage failed — storage may be full');
-        toast('⚠️ 儲存失敗！請立即匯出備份');
-      }
-    });
-    try { localStorage.setItem(SK, v); lsOk = true; } catch(e) {
-      lsOk = false;
+    idbSet(SK, v).catch(() => {});
+    try { localStorage.setItem(SK, v); lsOk = true; } catch(e) {}
+    // 兩邊都寫不進去才警告（idbSet 失敗已在 idbSet 內 console.error）
+    if (!lsOk) {
+      console.error('[save] localStorage also failed — storage may be full');
+      toast('⚠️ 儲存失敗！請立即匯出備份');
     }
   };
   const saveCats = () => {
@@ -1788,7 +1777,7 @@
   const isUnsplitDone = r => r.cat === UNSPLIT_KEY && r.amt <= 0;
   // 取得目前所有「待拆帳」紀錄中尚未分配完的總金額（跨全部歷史，不限本月）
   const totalUnsplitRemaining = () =>
-    recs.filter(r => r.cat === UNSPLIT_KEY && !r.deleted)
+    recs.filter(r => r.cat === UNSPLIT_KEY)
         .reduce((s, r) => s + unsplitRemaining(r), 0);
 
   /* ── 分類按鈕渲染（動態建立可捲動清單） ── */
@@ -1990,9 +1979,6 @@
 
     grid.addEventListener('touchend', endPress, { passive: true });
     grid.addEventListener('touchcancel', endPress, { passive: true });
-    // 觸控結束後短暫標記，防止合成 mouse 事件重複觸發；500ms 後重置，讓滑鼠可繼續使用
-    grid.addEventListener('touchend',    () => { setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
-    grid.addEventListener('touchcancel', () => { setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
 
     // Mouse（桌機；若裝置剛觸發過 touch，忽略合成滑鼠事件避免重複）
     grid.addEventListener('mousedown', e => {
@@ -2051,7 +2037,9 @@
     btn.addEventListener('touchcancel', () => { clearTimeout(timer); timer = null; }, { passive: true });
   }
 
-
+  function riLongPressStart() {}
+  function riLongPressMove() {}
+  function riLongPressEnd() {}
   /* 結構: bdgPlan[catKey] = { budget, subs:[{id,name,budget}], open } */
   const SK_BDGPLAN = 'kakeibo_bdgplan';
   let bdgPlan = {}; // keyed by catKey
@@ -2075,7 +2063,7 @@
     const mrs = getMrs();
     const out = {};
     mrs.forEach(r => {
-      if (!r.bdgRef || r.exempt || r.deleted) return; // 排除 exempt 和 deleted
+      if (!r.bdgRef || r.exempt) return; // 排除 exempt
       const ck = r.bdgRef.catKey;
       out[ck] = (out[ck] || 0) + r.amt;
       if (r.bdgRef.subId !== undefined) {
@@ -2422,23 +2410,20 @@
     const subName = (_splitSelSub !== null && bdgPlan[_splitSelCat])
       ? (bdgPlan[_splitSelCat].subs.find(s => s.id === _splitSelSub) || {}).name || '' : '';
     const catLabel = CATS[_splitSelCat].lbl + (subName ? ' › ' + subName : '');
-    const now = Date.now();
-    const newRec = { id: _nextId++, date: r.date, cat: _splitSelCat, amt: v, note: r.note || '', updatedAt: now };
+    const newRec = { id: _nextId++, date: r.date, cat: _splitSelCat, amt: v, note: r.note || '' };
     if (_splitSelSub !== null) newRec.bdgRef = { catKey: _splitSelCat, subId: _splitSelSub };
     recs.push(newRec);
 
     // 扣減原始待拆帳金額
     r.amt = Math.round((r.amt - v) * 100) / 100;
-    r.updatedAt = now;
 
-    // 若已全部拆完，軟刪除原始待拆帳紀錄並關閉
+    // 若已全部拆完，刪除原始待拆帳紀錄並關閉
     if (r.amt <= 0) {
-      r.deleted   = true;
-      r.deletedAt = now;
-      r.updatedAt = now;
+      const delId = r.id;
+      recs = recs.filter(x => x.id !== r.id);
       save();
       fbSyncRec(newRec);
-      fbSyncRec(r);
+      fbDeleteRec(delId);
       toast('🎉 已全部拆分完成！');
       closeSplitModal();
       return;
@@ -2511,14 +2496,11 @@
       toast('已移除關聯');
     } else {
       rec.bdgRef = subId !== undefined ? { catKey, subId } : { catKey };
-      // 同步更新記帳分類，讓列表顯示與預算關聯一致
-      if (CKEYS.includes(catKey)) rec.cat = catKey;
       const c = CATS[catKey];
       const plan = bdgPlan[catKey];
       const sub  = subId !== undefined ? plan.subs.find(s => s.id === subId) : null;
       toast('已關聯：' + c.icon + ' ' + c.lbl + (sub ? ' › ' + sub.name : ''));
     }
-    rec.updatedAt = Date.now();
     save();
     if (rec) fbSyncRec(rec);
     render();
@@ -2536,43 +2518,10 @@
 
   /* ── Firebase 初始化入口（登入後呼叫） ── */
   window._fbLoadAndInit = async () => {
-    // 先讀本地資料
-    await loadAll();
-    const localMap = new Map(recs.map(r => [r.id, r]));
-
-    // 讀雲端（現在回傳資料，不覆寫 recs）
-    const cloudRecs = await fbLoadAll();
-
-    // 雲端沒資料 → 直接用本地
-    if (cloudRecs.length === 0) {
-      await init();
-      return;
-    }
-
-    // 本地沒資料 → 直接用雲端
-    if (localMap.size === 0) {
-      recs = cloudRecs;
-      await init();
-      return;
-    }
-
-    // 兩邊都有資料 → 以 updatedAt 為準合併，誰新誰贏
-    const cloudMap = new Map(cloudRecs.map(r => [r.id, r]));
-    const merged   = new Map();
-
-    cloudMap.forEach((r, id) => merged.set(id, r));
-    localMap.forEach((local, id) => {
-      if (!merged.has(id)) {
-        merged.set(id, local);
-      } else {
-        const cloud   = merged.get(id);
-        const localTs = local.updatedAt || 0;
-        const cloudTs = cloud.updatedAt || 0;
-        if (localTs > cloudTs) merged.set(id, local);
-      }
-    });
-
-    recs = [...merged.values()].sort((a, b) => b.id - a.id);
+    // 優先從 Firebase 載入資料，沒有再 fallback 本地
+    await fbLoadAll();
+    // 若 Firebase 也沒有資料，嘗試本地
+    if (recs.length === 0) await loadAll();
     await init();
   };
 
@@ -2804,7 +2753,7 @@
     if (!dv) { toast('請選日期'); return; }
 
     const note = document.getElementById('noteInp').value.trim();
-    const newRec = { id: _nextId++, date: dv, cat, amt, note, updatedAt: Date.now() };
+    const newRec = { id: _nextId++, date: dv, cat, amt, note };
     recs.unshift(newRec);
     save();
     fbSyncRec(newRec);
@@ -2825,7 +2774,6 @@
     const r = recs.find(r => r.id === id);
     if (!r) return;
     r.exempt = !r.exempt;
-    r.updatedAt = Date.now();
     save();
     fbSyncRec(r);
     render();
@@ -2899,10 +2847,7 @@
     const state = _lpTimers.get(el);
     // 如果是剛完成長按（timer 已被設為 null），不執行短按
     if (state === null) { _lpTimers.delete(el); return; }
-    const id     = parseInt(el.dataset.id);
-    const action = el.dataset.action;
-    if (action === 'split')  openSplitModal(id);
-    else                     openTreePicker(id);
+    eval(el.dataset.tap);
   }
 
   /* ── 編輯備註 ── */
@@ -2927,7 +2872,6 @@
     const r = recs.find(r => r.id === _editNoteRecId);
     if (!r) { closeEditNote(); return; }
     r.note = document.getElementById('editNoteInp').value.trim();
-    r.updatedAt = Date.now();
     save();
     fbSyncRec(r);
     render();
@@ -2937,13 +2881,9 @@
 
   /* ── 刪除記帳 ── */
   function delRec(id) {
-    const r = recs.find(r => r.id === id);
-    if (!r) return;
-    r.deleted   = true;
-    r.deletedAt = Date.now();
-    r.updatedAt = r.deletedAt;
+    recs = recs.filter(r => r.id !== id);
     save();
-    fbSyncRec(r);
+    fbDeleteRec(id);
     render();
   }
 
@@ -2953,8 +2893,6 @@
     if (vm > 11) { vm = 0; vy++; }
     if (vm < 0)  { vm = 11; vy--; }
     collapsed = {};
-    // 切換月份時同步清空分析頁展開狀態，行為與折疊狀態一致
-    Object.keys(anaOpen).forEach(k => delete anaOpen[k]);
     const cls = d > 0 ? 'slide-in-right' : 'slide-in-left';
     const panel = ctab === 'list' ? document.getElementById('listPanel') : document.getElementById('anaPanel');
     render();
@@ -2990,7 +2928,7 @@
   /* ── 取得當月記帳 ── */
   function getMrs() {
     const p = vy + '-' + String(vm + 1).padStart(2, '0');
-    return recs.filter(r => r.date.startsWith(p) && !r.deleted);
+    return recs.filter(r => r.date.startsWith(p));
   }
 
   /* ── 切換總額顯示模式 ── */
@@ -3128,14 +3066,15 @@
         const plainLbl = linkedCat ? '' : c.lbl;
         const noteFallbackLbl = linkedCat ? linkedCat.lbl : c.lbl;
 
-        const rowAction = isUnsplit ? 'split' : 'tree';
+        const rowClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
+        const iconClick = isUnsplit ? `openSplitModal(${r.id})` : `openTreePicker(${r.id})`;
 
         return `<div class="ri${r.exempt ? ' exempt-row' : ''}${isUnsplit ? ' ri-unsplit' : ''}">
           <div class="ri-ico" style="cursor:pointer" onclick="${iconClick}" title="${isUnsplit ? '點擊拆分' : '點擊關聯預算'}">${displayIcon}</div>
           <div class="ri-info"
             oncontextmenu="openEditNote(${r.id});return false"
             style="-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer"
-            data-action="${rowAction}"
+            data-tap="${rowClick}"
             data-id="${r.id}"
             ontouchstart="riLongPressStart(event,this)"
             ontouchend="riLongPressEnd(event,this)"
@@ -3146,7 +3085,7 @@
             <div class="ri-note">${r.note ? esc(r.note) : noteFallbackLbl}</div>
             <div class="ri-cat">${plainLbl}${bdgTag}${unsplitTag}</div>
           </div>
-          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="${isUnsplit ? `openSplitModal(${r.id})` : `toggleExempt(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊切換是否計入預算'}"><small>$</small>${r.amt.toLocaleString()}</div>
+          <div class="ri-amt${r.exempt ? ' exempt' : ''}" onclick="${isUnsplit ? rowClick : `toggleExempt(${r.id})`}" title="${isUnsplit ? '點擊拆分' : '點擊切換是否計入預算'}"><small>$</small>${r.amt.toLocaleString()}</div>
           <button class="ri-del" onclick="delRec(${r.id})">✕</button>
         </div>`;
       }).join('');
@@ -3283,7 +3222,7 @@
   function toggleAnaCard(k) {
     anaOpen[k] = !anaOpen[k];
     const mrs = getMrs();
-    const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
+    const displayMrs = mrs;
     const displayTotal = displayMrs.reduce((s, r) => s + r.amt, 0);
     renderAna(displayMrs, displayTotal);
   }
@@ -3300,10 +3239,9 @@
 
   /* ── 匯出 CSV ── */
   function exportCSV() {
-    const activeRecs = recs.filter(r => !r.deleted);
-    if (activeRecs.length === 0) { toast('沒有資料可以匯出'); return; }
+    if (recs.length === 0) { toast('沒有資料可以匯出'); return; }
     const header = '日期,分類,金額,備註,不計入預算';
-    const rows = activeRecs.map(r => {
+    const rows = recs.map(r => {
       const c    = CATS[r.cat] || UNCATEGORIZED;
       const note = (r.note || '').replace(/,/g, '，').replace(/\n/g, ' ');
       return `${r.date},${c.lbl},${r.amt},${note},${r.exempt ? '是' : ''}`;
@@ -3327,7 +3265,7 @@
     const payload = {
       v: 3,
       ts: Date.now(),
-      recs: recs.filter(r => !r.deleted),
+      recs,
       bdgPlan,
       catsList: CATS_LIST,
       labels: (() => { try { return JSON.parse(localStorage.getItem(SK_LBL) || '{}'); } catch(e) { return {}; } })(),
@@ -3385,19 +3323,18 @@
   }
 
   async function fbLoadAll() {
-    if (!window._fb || !window._fbUser) return [];
+    if (!window._fb || !window._fbUser) return;
     const { db, collection, getDocs, doc, getDoc } = window._fb;
     const uid = window._fbUser.uid;
-    // 讀取 recs — 只回傳，不覆寫全域 recs
-    let cloudRecs = [];
+    // 讀取 recs
     try {
       const snap = await getDocs(collection(db, 'users', uid, 'recs'));
       if (!snap.empty) {
-        cloudRecs = snap.docs.map(d => d.data());
-        cloudRecs.sort((a, b) => b.id - a.id);
+        recs = snap.docs.map(d => d.data());
+        recs.sort((a, b) => b.id - a.id);
       }
     } catch(e) { console.error('[FB] loadRecs failed', e); }
-    // 讀取 meta（分類、預算等）— 這些仍直接套用，沒有衝突問題
+    // 讀取 meta（分類、預算等）
     const metaKeys = [SK_CATS, SK_BDG, SK_MODE, SK_BDGPLAN];
     for (const k of metaKeys) {
       try {
@@ -3423,7 +3360,6 @@
         }
       } catch(e) { console.error('[FB] loadMeta failed', k, e); }
     }
-    return cloudRecs;
   }
 
   /* ── 還原 JSON ── */
@@ -3439,75 +3375,31 @@
         const data = JSON.parse(text);
         if (!data.recs || !Array.isArray(data.recs)) throw new Error('格式錯誤');
         // 確認
-        const ok = confirm(`還原備份？\n共 ${data.recs.length} 筆記錄\n備份時間：${data.ts ? new Date(data.ts).toLocaleString() : '未知'}\n\n備份資料將與雲端合併，兩邊記錄都會保留。`);
+        const ok = confirm(`還原備份？\n共 ${data.recs.length} 筆記錄\n備份時間：${data.ts ? new Date(data.ts).toLocaleString() : '未知'}\n\n⚠️ 這會覆蓋目前所有資料！`);
         if (!ok) return;
-
-        // 先從 Firebase 讀取雲端資料（暫存，不覆蓋現有 recs）
-        toast('☁️ 正在讀取雲端資料…');
-        let cloudRecs = [];
-        try {
-          if (window._fb && window._fbUser) {
-            const { db, collection, getDocs } = window._fb;
-            const snap = await getDocs(collection(db, 'users', window._fbUser.uid, 'recs'));
-            if (!snap.empty) cloudRecs = snap.docs.map(d => d.data());
-          }
-        } catch(e) { console.error('[restore] fbLoad failed', e); }
-
-        // 合併：比 updatedAt，誰新誰贏；雲端沒有的補入
-        const newRecs = [];
-        const merged  = new Map();
-        cloudRecs.forEach(r => merged.set(r.id, r));
-        data.recs.forEach(r => {
-          if (!merged.has(r.id)) {
-            merged.set(r.id, r);
-            newRecs.push(r);
-          } else {
-            const cloud   = merged.get(r.id);
-            const backupTs = r.updatedAt || 0;
-            const cloudTs  = cloud.updatedAt || 0;
-            if (backupTs > cloudTs) {
-              merged.set(r.id, r);
-              newRecs.push(r); // 備份比較新，也要上傳更新雲端
-            }
-          }
-        });
-        recs = [...merged.values()].sort((a, b) => b.id - a.id);
-
+        recs = data.recs;
         if (data.bdgPlan && typeof data.bdgPlan === 'object') bdgPlan = data.bdgPlan;
         if (Array.isArray(data.catsList) && data.catsList.length > 0) CATS_LIST = data.catsList;
         rebuildCats();
         if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
         initBdgPlan();
-
-        // 用比所有現有 id 都大的值當 _nextId，避免衝突
-        _nextId = recs.length > 0
-          ? Math.max(Date.now(), Math.max(...recs.map(r => r.id)) + 1)
-          : Date.now();
-
+        if (recs.length > 0) _nextId = Math.max(...recs.map(r => r.id)) + 1;
         save();
         saveBdgPlan();
         saveCats();
         renderCatBtns();
         render();
         closeBackupMenu();
-
-        // 只上傳備份檔裡有、雲端沒有的筆數
-        if (newRecs.length > 0) {
-          const total = newRecs.length;
-          let uploaded = 0;
-          for (const r of newRecs) {
-            await fbSyncRec(r);
-            uploaded++;
-            if (uploaded % 5 === 0 || uploaded === total) {
-              toast(`⏫ 同步中… ${uploaded} / ${total} 筆`);
-            }
-          }
-          await fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan));
-          await fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST));
-          toast(`✅ 已補上 ${newRecs.length} 筆到 Firebase`);
-        } else {
-          toast('✅ 備份與雲端已完全一致，無需同步');
+        // 批次上傳所有 recs 到 Firebase
+        toast('⏫ 正在同步到 Firebase…');
+        let uploaded = 0;
+        for (const r of recs) {
+          await fbSyncRec(r);
+          uploaded++;
         }
+        await fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan));
+        await fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST));
+        toast('✅ 已還原並同步 ' + uploaded + ' 筆到 Firebase');
       } catch(err) {
         toast('❌ 還原失敗：' + err.message);
       }
@@ -3516,33 +3408,6 @@
   }
 
   /* ── 備份選單 ── */
-  async function forceLoadFromCloud() {
-    if (!window._fb || !window._fbUser) {
-      toast('⚠️ 請先登入 Google 帳號');
-      return;
-    }
-    const ok = confirm('從 Firebase 強制讀取資料？\n本地資料將被雲端覆蓋。');
-    if (!ok) return;
-    toast('☁️ 正在從雲端讀取…');
-    try {
-      const { db, collection, getDocs } = window._fb;
-      const snap = await getDocs(collection(db, 'users', window._fbUser.uid, 'recs'));
-      if (snap.empty) {
-        toast('⚠️ 雲端沒有資料');
-        return;
-      }
-      recs = snap.docs.map(d => d.data());
-      recs.sort((a, b) => b.id - a.id);
-      _nextId = recs.length > 0 ? Math.max(Date.now(), Math.max(...recs.map(r => r.id)) + 1) : Date.now();
-      save();
-      render();
-      closeBackupMenu();
-      toast('✅ 已從雲端讀取 ' + recs.length + ' 筆資料');
-    } catch(e) {
-      toast('❌ 讀取失敗：' + e.message);
-    }
-  }
-
   function openBackupMenu() {
     const el = document.getElementById('backupMenuOverlay');
     el.style.display = 'flex';
@@ -3578,7 +3443,6 @@
     const prevVm = vm, prevVy = vy;
     vy = mpYear; vm = m;
     collapsed = {};
-    Object.keys(anaOpen).forEach(k => delete anaOpen[k]);
     closeMp();
     const direction = (vy > prevVy || (vy === prevVy && vm > prevVm)) ? 1 : -1;
     const cls = direction > 0 ? 'slide-in-right' : 'slide-in-left';
