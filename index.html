@@ -1015,7 +1015,30 @@
       padding: 8px 10px; border-radius: 10px;
       background: rgba(240,216,216,0.1); margin-bottom: 5px; border: 1px solid var(--bdr);
     }
-    .bdgp-sub-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rose); flex-shrink: 0; margin-top: 4px; }
+    .bdgp-sub-dot {
+      width: 16px; height: 16px; flex-shrink: 0; margin-top: -2px;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: none; cursor: grab; border-radius: 6px;
+      position: relative;
+    }
+    .bdgp-sub-dot::before {
+      content: '';
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--rose);
+      transition: transform .15s, background .15s;
+    }
+    .bdgp-sub-dot:active::before { transform: scale(1.3); background: var(--roseDk); }
+    .bdgp-sub-item.dragging {
+      box-shadow: 0 6px 18px var(--shd);
+      background: var(--card);
+      opacity: .96;
+    }
+    .bdgp-sub-placeholder {
+      border-radius: 10px;
+      margin-bottom: 5px;
+      border: 1.5px dashed var(--bdr);
+      background: rgba(220,170,170,0.08);
+    }
     .bdgp-sub-main { flex: 1; min-width: 0; }
     .bdgp-sub-top-row { display: flex; align-items: center; gap: 5px; }
     .bdgp-sub-name { flex: 1; font-size: 12px; font-weight: 600; color: var(--text); }
@@ -2135,8 +2158,8 @@
         const ss    = sp[k + ':' + s.id] || 0;
         const spct  = s.budget > 0 ? Math.min(100, Math.round(ss / s.budget * 100)) : 0;
         const sOver = s.budget > 0 && ss > s.budget;
-        subsHtml += `<div class="bdgp-sub-item">
-          <span class="bdgp-sub-dot"></span>
+        subsHtml += `<div class="bdgp-sub-item" data-cat="${k}" data-sid="${s.id}">
+          <span class="bdgp-sub-dot" title="按住拖動排序，雙擊刪除"></span>
           <div class="bdgp-sub-main">
             <div class="bdgp-sub-top-row">
               <input
@@ -2192,6 +2215,8 @@
     panel.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px 6px">
       <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1.2px">預算規劃</span>
     </div>${summaryHtml}${itemsHtml}`;
+
+    setupSubDotHandlers(panel);
   }
 
   function renameBdgSub(k, sid, val) {
@@ -2251,6 +2276,186 @@
     });
     save();
     saveBdgPlan();
+    renderBdgPlan();
+  }
+
+  function confirmDelBdgSub(k, sid) {
+    const plan = bdgPlan[k];
+    const s = plan && plan.subs.find(x => x.id === sid);
+    const name = s ? s.name : '此細項';
+    const ok = confirm(`刪除細項「${name}」？\n相關記錄會保留，但不再關聯此細項。`);
+    if (ok) delBdgSub(k, sid);
+  }
+
+  /* ── 細項點點：長按拖動排序 / 雙擊刪除 ── */
+  const DOT_LONGPRESS_MS = 280;
+  const DOT_DRAG_MOVE_TOLERANCE = 6; // px，超過視為移動而非點擊
+  const DOT_DBLTAP_MS = 320;
+
+  let _subDrag = null;     // { k, sid, itemEl, listEl, startY, lastY, placeholder }
+  let _lastDotTap = null;  // { sid, t }
+
+  function setupSubDotHandlers(panel) {
+    panel.querySelectorAll('.bdgp-sub-dot').forEach(dot => {
+      // 避免重複綁定
+      if (dot._bound) return;
+      dot._bound = true;
+
+      let pressTimer = null;
+      let startX = 0, startY = 0;
+      let longPressFired = false;
+
+      const itemEl = () => dot.closest('.bdgp-sub-item');
+
+      const clearPressTimer = () => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      };
+
+      dot.addEventListener('touchstart', e => {
+        const item = itemEl();
+        if (!item) return;
+        const t = e.touches[0];
+        startX = t.clientX; startY = t.clientY;
+        longPressFired = false;
+
+        pressTimer = setTimeout(() => {
+          longPressFired = true;
+          startSubDrag(item, t.clientY);
+        }, DOT_LONGPRESS_MS);
+      }, { passive: true });
+
+      dot.addEventListener('touchmove', e => {
+        const t = e.touches[0];
+        if (_subDrag) {
+          e.preventDefault();
+          moveSubDrag(t.clientY);
+          return;
+        }
+        // 還沒進入拖曳狀態時，如果手指移動超過容許範圍，視為非長按（取消，避免誤觸）
+        if (Math.abs(t.clientX - startX) > DOT_DRAG_MOVE_TOLERANCE ||
+            Math.abs(t.clientY - startY) > DOT_DRAG_MOVE_TOLERANCE) {
+          clearPressTimer();
+        }
+      }, { passive: false });
+
+      dot.addEventListener('touchend', e => {
+        clearPressTimer();
+        if (_subDrag) {
+          endSubDrag();
+          return;
+        }
+        if (longPressFired) return; // 長按已處理過，不要再判定為點擊
+
+        // 雙擊判斷
+        const item = itemEl();
+        if (!item) return;
+        const sid = +item.dataset.sid;
+        const k   = item.dataset.cat;
+        const now = Date.now();
+        if (_lastDotTap && _lastDotTap.sid === sid && (now - _lastDotTap.t) < DOT_DBLTAP_MS) {
+          _lastDotTap = null;
+          confirmDelBdgSub(k, sid);
+        } else {
+          _lastDotTap = { sid, t: now };
+        }
+      }, { passive: true });
+
+      dot.addEventListener('touchcancel', () => {
+        clearPressTimer();
+        if (_subDrag) endSubDrag(true);
+      }, { passive: true });
+
+      // 桌面滑鼠雙擊（方便電腦上測試/使用）
+      dot.addEventListener('dblclick', e => {
+        e.preventDefault();
+        const item = itemEl();
+        if (!item) return;
+        confirmDelBdgSub(item.dataset.cat, +item.dataset.sid);
+      });
+    });
+  }
+
+  function startSubDrag(itemEl, clientY) {
+    const listEl = itemEl.closest('.bdgp-sub-list');
+    if (!listEl) return;
+    const k   = itemEl.dataset.cat;
+    const sid = +itemEl.dataset.sid;
+
+    const rect = itemEl.getBoundingClientRect();
+    const placeholder = document.createElement('div');
+    placeholder.className = 'bdgp-sub-placeholder';
+    placeholder.style.height = rect.height + 'px';
+    itemEl.after(placeholder);
+
+    itemEl.classList.add('dragging');
+    itemEl.style.position = 'fixed';
+    itemEl.style.left = rect.left + 'px';
+    itemEl.style.top = rect.top + 'px';
+    itemEl.style.width = rect.width + 'px';
+    itemEl.style.zIndex = '999';
+
+    document.body.appendChild(itemEl);
+
+    _subDrag = { k, sid, itemEl, listEl, placeholder, offsetY: clientY - rect.top, lastTop: rect.top };
+
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
+  }
+
+  function moveSubDrag(clientY) {
+    if (!_subDrag) return;
+    const { itemEl, placeholder, listEl, offsetY } = _subDrag;
+    const top = clientY - offsetY;
+    itemEl.style.top = top + 'px';
+    _subDrag.lastTop = top;
+
+    // 找出目前位置應插入的位置：比較與其他 sub-item 中心點的關係
+    const siblings = [...listEl.querySelectorAll('.bdgp-sub-item:not(.dragging)')];
+    const itemCenter = top + itemEl.getBoundingClientRect().height / 2;
+
+    let target = null;
+    for (const sib of siblings) {
+      const r = sib.getBoundingClientRect();
+      const sibCenter = r.top + r.height / 2;
+      if (itemCenter < sibCenter) { target = sib; break; }
+    }
+
+    if (target) {
+      if (target.previousSibling !== placeholder) listEl.insertBefore(placeholder, target);
+    } else {
+      if (listEl.lastElementChild !== placeholder) listEl.appendChild(placeholder);
+    }
+  }
+
+  function endSubDrag(cancelled) {
+    if (!_subDrag) return;
+    const { k, sid, itemEl, placeholder, listEl } = _subDrag;
+
+    itemEl.classList.remove('dragging');
+    itemEl.style.position = '';
+    itemEl.style.left = '';
+    itemEl.style.top = '';
+    itemEl.style.width = '';
+    itemEl.style.zIndex = '';
+
+    if (!cancelled) {
+      placeholder.replaceWith(itemEl);
+
+      // 依據 DOM 最終順序重排資料
+      const finalOrder = [...listEl.querySelectorAll('.bdgp-sub-item')].map(el => +el.dataset.sid);
+      const plan = bdgPlan[k];
+      if (plan) {
+        const bySid = new Map(plan.subs.map(s => [s.id, s]));
+        const newSubs = finalOrder.map(id => bySid.get(id)).filter(Boolean);
+        // 防止任何遺漏（理論上不會發生）
+        plan.subs.forEach(s => { if (!newSubs.includes(s)) newSubs.push(s); });
+        plan.subs = newSubs;
+        saveBdgPlan();
+      }
+    } else {
+      placeholder.replaceWith(itemEl);
+    }
+
+    _subDrag = null;
     renderBdgPlan();
   }
 
