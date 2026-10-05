@@ -8,12 +8,10 @@
   <link rel="manifest" href="./manifest.json">
   <title>記帳</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-  <!-- Firebase SDK -->
+  <!-- Firebase SDK（改為動態載入：離線或載入失敗時不會卡住整個 App） -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-    import { getFirestore, doc, setDoc, deleteDoc, getDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
+    const FB_BASE  = 'https://www.gstatic.com/firebasejs/10.12.2/';
+    const AUTH_KEY = 'kakeibo_authed_uid';   // 曾通過驗證的帳號：離線時憑此直接進入
     const firebaseConfig = {
       apiKey: "AIzaSyAKpdKG7Z9VftOewWAF8icxJDlyt-za8R4",
       authDomain: "counter-e1ce2.firebaseapp.com",
@@ -23,58 +21,152 @@
       appId: "1:1079520607651:web:d75a7447f1c6de3e5e2e16"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+    const $     = id => document.getElementById(id);
+    const lsGet = k => { try { return localStorage.getItem(k); } catch(e) { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} };
+    const lsDel = k => { try { localStorage.removeItem(k); } catch(e) {} };
+    const withTimeout = (p, ms) => Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'timeout' })), ms))
+    ]);
 
-    // 掛到 window，讓非 module 的 script 可以存取
-    window._fb = { auth, db, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, doc, setDoc, deleteDoc, getDoc, collection, getDocs, onSnapshot };
+    let fb = null;            // Firebase 模組（載入成功才有值）
+    let booting = null;
+    let authResolved = false;
+    let synced = false;       // 本次連線是否已與雲端合併過
 
-    // 監聽登入狀態：登入後嘗試寫一筆 _ping，靠 Firestore Rules 判斷是否有權限
-    onAuthStateChanged(auth, async user => {
-      if (user) {
-        try {
-          // 用 Firestore Rules 當守門員，不在前端放任何白名單
-          await setDoc(doc(db, 'users', user.uid, 'meta', '_ping'), { ts: Date.now() });
-          // 通過 → 進入 App
-          document.getElementById('loginDenied').style.display = 'none';
-          window._fbUser = user;
-          document.getElementById('loginOverlay').style.display = 'none';
-          if (!window._appInited) {
-            window._appInited = true;
-            window._fbLoadAndInit();
-          }
-        } catch(e) {
-          // Firestore Rules 拒絕 → 強制登出
-          await signOut(auth);
-          window._fbUser = null;
-          document.getElementById('loginOverlay').style.display = 'flex';
-          document.getElementById('loginDenied').style.display = 'block';
-          document.getElementById('loginUidHint').style.display = 'none';
-          document.getElementById('googleSignInBtn').style.display = 'flex';
-          document.getElementById('loginSyncBadge').textContent = 'GOOGLE 登入';
-        }
-      } else {
+    function showLogin({ denied = false, badge = 'GOOGLE 登入' } = {}) {
+      $('loginOverlay').style.display = 'flex';
+      $('loginDenied').style.display = denied ? 'block' : 'none';
+      $('loginUidHint').style.display = 'none';
+      $('googleSignInBtn').style.display = 'flex';
+      const b = $('loginSyncBadge');
+      b.textContent = badge;
+      b.style.userSelect = '';
+    }
+
+    // 進入 App（可離線；有雲端帳號且在線時會同步）
+    function startApp() {
+      $('loginOverlay').style.display = 'none';
+      if (window._appInited) return;
+      window._appInited = true;
+      synced = !!window._fbUser && navigator.onLine;
+      window._fbLoadAndInit();
+    }
+
+    // 離線期間進入或離線後恢復連線 → 重新與雲端合併一次
+    function ensureSynced() {
+      if (synced || !window._fbUser || !navigator.onLine || !window._appInited) return;
+      synced = true;
+      window._fbLoadAndInit();
+    }
+
+    async function onUser(user) {
+      authResolved = true;
+      const saved = lsGet(AUTH_KEY);
+
+      if (!user) {
         window._fbUser = null;
-        document.getElementById('loginOverlay').style.display = 'flex';
-        document.getElementById('loginSyncBadge').textContent = 'GOOGLE 登入';
-        document.getElementById('loginSyncBadge').style.userSelect = '';
-        document.getElementById('googleSignInBtn').style.display = 'flex';
-        document.getElementById('loginUidHint').style.display = 'none';
-        document.getElementById('loginDenied').style.display = 'none';
+        if (!navigator.onLine && saved) { startApp(); return; }
+        showLogin({ badge: navigator.onLine ? 'GOOGLE 登入' : '離線中・首次使用需連線登入' });
+        return;
       }
-    });
+
+      // 離線：曾驗證過的帳號直接放行（本機資料）
+      if (!navigator.onLine) {
+        if (saved === user.uid) { window._fbUser = user; startApp(); }
+        else { window._fbUser = null; showLogin({ badge: '離線中・首次使用需連線登入' }); }
+        return;
+      }
+
+      // 在線：用 Firestore Rules 當守門員，不在前端放任何白名單
+      try {
+        await withTimeout(
+          fb.setDoc(fb.doc(fb.db, 'users', user.uid, 'meta', '_ping'), { ts: Date.now() }),
+          8000
+        );
+      } catch (e) {
+        if (e && e.code === 'permission-denied') {
+          lsDel(AUTH_KEY);
+          try { await fb.signOut(fb.auth); } catch(_) {}
+          window._fbUser = null;
+          showLogin({ denied: true });
+          return;
+        }
+        // 網路不穩 / 逾時：曾驗證過就放行，否則請稍後再試
+        if (saved === user.uid) { window._fbUser = user; startApp(); }
+        else { window._fbUser = null; showLogin({ badge: '無法連線驗證，請稍後再試' }); }
+        return;
+      }
+
+      lsSet(AUTH_KEY, user.uid);
+      window._fbUser = user;
+      startApp();
+      ensureSynced();
+    }
+
+    function bootFirebase() {
+      if (fb) return Promise.resolve();
+      if (booting) return booting;
+      booting = (async () => {
+        try {
+          const [A, Au, F] = await Promise.all([
+            import(FB_BASE + 'firebase-app.js'),
+            import(FB_BASE + 'firebase-auth.js'),
+            import(FB_BASE + 'firebase-firestore.js')
+          ]);
+          const app  = A.initializeApp(firebaseConfig);
+          const auth = Au.getAuth(app);
+          const db   = F.getFirestore(app);
+          fb = {
+            auth, db,
+            GoogleAuthProvider: Au.GoogleAuthProvider, signInWithPopup: Au.signInWithPopup,
+            onAuthStateChanged: Au.onAuthStateChanged, signOut: Au.signOut,
+            doc: F.doc, setDoc: F.setDoc, deleteDoc: F.deleteDoc, getDoc: F.getDoc,
+            collection: F.collection, getDocs: F.getDocs, onSnapshot: F.onSnapshot
+          };
+          window._fb = fb;   // 掛到 window，讓非 module 的 script 可以存取
+          fb.onAuthStateChanged(auth, onUser);
+        } catch (e) {
+          console.warn('[FB] 載入失敗（可能離線）', e);
+          fb = null;
+        } finally {
+          booting = null;
+        }
+      })();
+      return booting;
+    }
 
     window._googleSignIn = async () => {
+      if (!fb) await bootFirebase();
+      if (!fb) { alert('目前無法連線。請在有網路時登入一次，之後即可離線使用。'); return; }
       try {
-        document.getElementById('loginDenied').style.display = 'none';
-        const provider = new GoogleAuthProvider();
-        await signInWithPopup(auth, provider);
-      } catch(e) {
+        $('loginDenied').style.display = 'none';
+        await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
+      } catch (e) {
         console.error('登入失敗', e);
         alert('登入失敗：' + e.message);
       }
     };
+
+    // ── 啟動 ──
+    // 離線且曾登入過：不等 Firebase，直接用本機資料進入
+    if (lsGet(AUTH_KEY) && !navigator.onLine) startApp();
+
+    bootFirebase().then(() => {
+      if (!fb && !window._appInited) {   // Firebase 載入失敗（離線或被擋）
+        if (lsGet(AUTH_KEY)) startApp();
+        else showLogin({ badge: navigator.onLine ? '無法載入登入元件' : '離線中・首次使用需連線登入' });
+      }
+    });
+
+    // 保險：Auth 初始化卡住時，曾登入過的裝置 5 秒後直接進入
+    setTimeout(() => {
+      if (!authResolved && !window._appInited && lsGet(AUTH_KEY)) startApp();
+    }, 5000);
+
+    window.addEventListener('online',  async () => { await bootFirebase(); ensureSynced(); });
+    window.addEventListener('offline', () => { synced = false; });
   </script>
   <style>
     :root {
@@ -2748,11 +2840,21 @@
     await loadAll();
     const localMap = new Map(recs.map(r => [r.id, r]));
 
-    // 讀雲端（現在回傳資料，不覆寫 recs）
-    const cloudRecs = await fbLoadAll();
+    // 讀雲端（回傳資料，不覆寫 recs）。離線或未登入 → 只用本機資料
+    let cloudRecs = [];
+    let cloudOk = false;
+    if (navigator.onLine && window._fbUser) {
+      window._fbRecsLoadOk = false;
+      cloudRecs = await Promise.race([
+        fbLoadAll(),
+        new Promise(res => setTimeout(() => res([]), 10000))   // 網路太慢就先用本機
+      ]);
+      cloudOk = window._fbRecsLoadOk === true;
+    }
 
     // 雲端沒資料 → 直接用本地
     if (cloudRecs.length === 0) {
+      if (cloudOk) recs.forEach(r => fbSyncRec(r));   // 雲端確定是空的 → 把本機資料補上去
       try { localStorage.setItem('kakeibo_last_open', recs.filter(r => !r.deleted).length > 0 ? '1' : '0'); } catch(e) {}
       await init();
       return;
@@ -2770,17 +2872,20 @@
     const cloudMap = new Map(cloudRecs.map(r => [r.id, r]));
     const merged   = new Map();
 
+    const toPush    = [];   // 離線期間在本機新增／修改過的記錄，需補推雲端
     cloudMap.forEach((r, id) => merged.set(id, r));
     localMap.forEach((local, id) => {
       if (!merged.has(id)) {
         merged.set(id, local);
+        toPush.push(local);
       } else {
         const cloud   = merged.get(id);
         const localTs = local.updatedAt || 0;
         const cloudTs = cloud.updatedAt || 0;
-        if (localTs > cloudTs) merged.set(id, local);
+        if (localTs > cloudTs) { merged.set(id, local); toPush.push(local); }
       }
     });
+    if (cloudOk) toPush.forEach(r => fbSyncRec(r));
 
     recs = [...merged.values()].sort((a, b) => b.id - a.id);
     try { localStorage.setItem('kakeibo_last_open', recs.filter(r => !r.deleted).length > 0 ? '1' : '0'); } catch(e) {}
@@ -3570,6 +3675,7 @@
 
   async function fbSyncRec(rec) {
     try {
+      if (!navigator.onLine) return;   // 離線：本機已存，下次連線時會自動補同步
       const col = _fbGetUserCol();
       if (!col) return;
       const { doc, setDoc } = window._fb;
@@ -3581,7 +3687,7 @@
 
   async function fbDeleteRec(id) {
     try {
-      if (!window._fb || !window._fbUser) return;
+      if (!navigator.onLine || !window._fb || !window._fbUser) return;
       const { doc, deleteDoc } = window._fb;
       await deleteDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'recs', String(id)));
     } catch(e) {
@@ -3591,11 +3697,18 @@
 
   async function fbSyncMeta(key, value) {
     try {
-      if (!window._fb || !window._fbUser) return;
+      if (!navigator.onLine) {
+        // 離線改動設定：記下來，恢復連線後以本機設定為準推上雲端
+        try { localStorage.setItem('kakeibo_meta_dirty', '1'); } catch(e) {}
+        return false;
+      }
+      if (!window._fb || !window._fbUser) return false;
       const { doc, setDoc } = window._fb;
       await setDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'meta', key), { value });
+      return true;
     } catch(e) {
       console.error('[FB] syncMeta failed', e);
+      return false;
     }
   }
 
@@ -3607,12 +3720,25 @@
     let cloudRecs = [];
     try {
       const snap = await getDocs(collection(db, 'users', uid, 'recs'));
+      window._fbRecsLoadOk = true;
       if (!snap.empty) {
         cloudRecs = snap.docs.map(d => d.data());
         cloudRecs.sort((a, b) => b.id - a.id);
       }
     } catch(e) { console.error('[FB] loadRecs failed', e); }
     // 讀取 meta（分類、預算等）— 這些仍直接套用，沒有衝突問題
+    // 離線期間改過分類／預算：以本機為準推上雲端，不讓舊的雲端設定蓋掉
+    let metaDirty = false;
+    try { metaDirty = localStorage.getItem('kakeibo_meta_dirty') === '1'; } catch(e) {}
+    if (metaDirty) {
+      const oks = await Promise.all([
+        fbSyncMeta(SK_CATS, JSON.stringify(CATS_LIST)),
+        fbSyncMeta(SK_BDG, String(budget)),
+        fbSyncMeta(SK_BDGPLAN, JSON.stringify(bdgPlan))
+      ]);
+      if (oks.every(Boolean)) { try { localStorage.removeItem('kakeibo_meta_dirty'); } catch(e) {} }
+      return cloudRecs;
+    }
     const metaKeys = [SK_CATS, SK_BDG, SK_MODE, SK_BDGPLAN];
     for (const k of metaKeys) {
       try {
@@ -3929,6 +4055,13 @@
   window.addEventListener('beforeunload', () => {
     save(); saveCats(); saveBdgPlan();
   });
+
+  // Service Worker：快取 App 本體與字型／Firebase 元件，離線也能開啟
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW] 註冊失敗', e));
+    });
+  }
 
   init();
 </script>
