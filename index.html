@@ -8,6 +8,8 @@
   <link rel="manifest" href="./manifest.json">
   <title>記帳</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- 曾登入過：首次繪製前就先隱藏登入畫面，避免閃一下 -->
+  <script>try{if(localStorage.getItem('kakeibo_authed_uid'))document.documentElement.classList.add('has-auth')}catch(e){}</script>
   <!-- Firebase SDK（改為動態載入：離線或載入失敗時不會卡住整個 App） -->
   <script type="module">
     const FB_BASE  = 'https://www.gstatic.com/firebasejs/10.12.2/';
@@ -151,7 +153,9 @@
 
     // ── 啟動 ──
     // 離線且曾登入過：不等 Firebase，直接用本機資料進入
-    if (lsGet(AUTH_KEY) && !navigator.onLine) startApp();
+    // 曾登入過：不論在線與否都先用本機資料進入；Auth 確認後再於背景與雲端合併
+    // （若 Auth 回報未登入／無權限，onUser 會再顯示登入畫面）
+    if (lsGet(AUTH_KEY)) startApp();
 
     bootFirebase().then(() => {
       if (!fb && !window._appInited) {   // Firebase 載入失敗（離線或被擋）
@@ -1383,6 +1387,7 @@
       flex-direction: column;
       gap: 28px;
     }
+    html.has-auth #loginOverlay { display: none; }   /* inline style（showLogin）優先於此規則 */
     #loginOverlay h1 {
       font-family: "Montserrat", sans-serif;
       font-size: 22px;
