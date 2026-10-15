@@ -2191,15 +2191,30 @@
   };
 
   /* ── 預算規劃渲染 ── */
+  /* 取得一筆記錄「實際歸屬」的預算位置：
+     1) 有明確關聯（bdgRef）且大分類仍存在 → 用 bdgRef（可能含細項 subId）
+     2) 否則退回記帳時選的大分類 r.cat（只選大項目、沒選細項的情況）
+     3) 待拆帳 / 分類已刪除 → null（不計入）                                  */
+  function effBdgRef(r) {
+    if (!r || r.cat === UNSPLIT_KEY) return null;
+    if (r.bdgRef && r.bdgRef.catKey && CKEYS.includes(r.bdgRef.catKey)) {
+      return { catKey: r.bdgRef.catKey, subId: r.bdgRef.subId };
+    }
+    if (r.cat && CKEYS.includes(r.cat)) return { catKey: r.cat, subId: undefined };
+    return null;
+  }
+
   function getBdgSpending() {
     const mrs = getMrs();
     const out = {};
     mrs.forEach(r => {
-      if (!r.bdgRef || r.exempt || r.deleted) return; // 排除 exempt 和 deleted
-      const ck = r.bdgRef.catKey;
+      if (r.exempt || r.deleted) return; // 排除 exempt 和 deleted
+      const ref = effBdgRef(r);
+      if (!ref) return;
+      const ck = ref.catKey;
       out[ck] = (out[ck] || 0) + r.amt;
-      if (r.bdgRef.subId !== undefined) {
-        const sk = ck + ':' + r.bdgRef.subId;
+      if (ref.subId !== undefined) {
+        const sk = ck + ':' + ref.subId;
         out[sk] = (out[sk] || 0) + r.amt;
       }
     });
@@ -2286,6 +2301,16 @@
           </div>
         </div>`;
       });
+
+      // 只選大項目、沒選細項的支出：已計入大項目總額，這裡列出讓加總對得起來
+      if (plan.subs.length > 0) {
+        const noSub = spent - plan.subs.reduce((a, s) => a + (sp[k + ':' + s.id] || 0), 0);
+        if (noSub > 0) {
+          subsHtml += `<div class="ana-sub-row"><span class="ana-sub-dot"></span>
+            <span class="ana-sub-name">未指定細項</span>
+            <span class="ana-sub-spent">$${noSub.toLocaleString()}</span></div>`;
+        }
+      }
 
       itemsHtml += `<div class="bdgp-item">
         <div class="bdgp-item-head" onclick="toggleBdgItem('${k}')" style="cursor:pointer">
@@ -3388,7 +3413,14 @@
     if (listFilterUnsplitOnly) {
       displayList = mrs.filter(r => r.cat === UNSPLIT_KEY && unsplitRemaining(r) > 0);
     } else if (listFilterUnlinked) {
-      displayList = mrs.filter(r => !r.bdgRef || !r.bdgRef.catKey);
+      // 「未關聯」= 沒有歸到任何大分類，或該大分類有細項但這筆還沒選細項
+      displayList = mrs.filter(r => {
+        if (r.cat === UNSPLIT_KEY) return false;
+        const ref = effBdgRef(r);
+        if (!ref) return true;
+        const plan = bdgPlan[ref.catKey];
+        return ref.subId === undefined && !!(plan && plan.subs && plan.subs.length > 0);
+      });
     }
 
     const filterBanner = listFilterUnsplitOnly
@@ -3506,8 +3538,9 @@
         unsplitRemain += unsplitRemaining(r);
         return;
       }
-      if (CKEYS.includes(r.cat)) {
-        tv[r.cat] += r.amt;
+      const eref = effBdgRef(r);
+      if (eref) {
+        tv[eref.catKey] += r.amt; // 與預算頁使用同一套歸屬規則，數字才會一致
       } else {
         uncategorizedTotal += r.amt; // 分類已被刪除的舊紀錄
       }
@@ -3550,6 +3583,12 @@
               ${sRem !== null ? `<span class="ana-sub-rem${sOver?' over':''}">剩$${Math.max(0,sRem).toLocaleString()}</span>` : ''}
             </div>`;
           });
+          const noSub = (bdgSp[k] || 0) - plan.subs.reduce((a, s) => a + (bdgSp[k + ':' + s.id] || 0), 0);
+          if (noSub > 0) {
+            subsHtml += `<div class="ana-sub-row"><span class="ana-sub-dot"></span>
+              <span class="ana-sub-name">未指定細項</span>
+              <span class="ana-sub-spent">$${noSub.toLocaleString()}</span></div>`;
+          }
         } else {
           subsHtml = `<div class="ana-no-sub">尚未設定細分類 → 前往「預算」頁新增</div>`;
         }

@@ -3,7 +3,7 @@
  * 更新 App 時：index.html 本身採「網路優先」，連線時永遠拿到最新版；
  * 若改了 sw.js 或想強制清掉舊快取，把 VERSION 加一即可。
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CORE_CACHE = `kakeibo-core-${VERSION}`;
 const RUNTIME_CACHE = `kakeibo-runtime-${VERSION}`;
 
