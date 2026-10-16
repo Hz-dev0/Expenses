@@ -446,6 +446,7 @@
       color: var(--text);
     }
     .ana-total-num small { font-size: 14px; color: var(--muted); font-weight: 600; margin-right: 2px; }
+    .ana-total-num.exempt-mode { color: #ec7fa0; }
 
     .ana-stack-wrap {
       background: var(--card);
@@ -1944,8 +1945,29 @@
     if (CATS_LIST.length <= 1) { toast('至少要保留一個分類'); return; }
     const c = findCat(key);
     if (!c) return;
-    const ok = confirm(`刪除分類「${c.lbl}」？\n此分類下的記帳記錄會保留，但分類標籤會顯示為「未分類」。`);
+    // 找出歸屬於此分類的所有記錄（跨全部月份）
+    const affected = recs.filter(r => {
+      if (r.deleted || r.cat === UNSPLIT_KEY) return false;
+      const ref = effBdgRef(r);
+      return (ref && ref.catKey === key) || r.cat === key;
+    });
+    const ok = confirm(`刪除分類「${c.lbl}」？\n` + (affected.length > 0
+      ? `此分類下有 ${affected.length} 筆記錄，刪除後它們將不再計入預算。`
+      : '此分類下沒有記錄。'));
     if (!ok) return;
+    if (affected.length > 0) {
+      const toUnsplit = confirm(`要把這 ${affected.length} 筆記錄改列為「待拆帳」，之後再逐筆重新分配到其他分類嗎？\n\n確定 = 改列待拆帳（之後仍會計入預算）\n取消 = 保持「未分類」（不計入預算）`);
+      if (toUnsplit) {
+        const now = Date.now();
+        affected.forEach(r => {
+          r.cat = UNSPLIT_KEY;
+          delete r.bdgRef;
+          r.updatedAt = now;
+          fbSyncRec(r);
+        });
+        save();
+      }
+    }
     CATS_LIST = CATS_LIST.filter(x => x.key !== key);
     delete bdgPlan[key];
     rebuildCats();
@@ -2221,16 +2243,54 @@
     return out;
   }
 
+  /* ── 預算按月份保存 ──
+     bdgPlan._hist = { 'YYYY-MM': { <subId 或 'cat:<catKey>'>: 金額 } }
+     某月的預算 = 「不晚於該月」最近一次的設定；都沒有就用原本的基準值（s.budget / plan.own）。
+     所以在 10 月修改預算，只會影響 10 月以後，不會改動過去月份的達成率。            */
+  const curYM = () => vy + '-' + String(vm + 1).padStart(2, '0');
+
+  function histLookup(key, ym, base) {
+    const h = bdgPlan._hist || {};
+    let best = null;
+    Object.keys(h).forEach(m => {
+      if (m <= ym && h[m] && h[m][key] !== undefined && (best === null || m > best)) best = m;
+    });
+    return best !== null ? h[best][key] : base;
+  }
+  function setHist(ym, key, v) {
+    const h = bdgPlan._hist || (bdgPlan._hist = {});
+    (h[ym] = h[ym] || {})[key] = v;
+  }
+  const subBudgetAt = (s, ym) => histLookup(s.id, ym, s.budget || 0);
+  function catBudgetAt(k, ym) {
+    const plan = bdgPlan[k];
+    if (!plan) return 0;
+    if (plan.subs.length > 0) return plan.subs.reduce((a, s) => a + subBudgetAt(s, ym), 0);
+    return histLookup('cat:' + k, ym, plan.own || 0);
+  }
+
+  // 編輯預算後延後重繪：輸入框還有焦點就先不畫（避免焦點丟失），失焦後再補畫
+  let _bdgDirty = false, _bdgRefreshTimer = null;
+  function scheduleBdgRefresh() {
+    _bdgDirty = true;
+    clearTimeout(_bdgRefreshTimer);
+    _bdgRefreshTimer = setTimeout(() => {
+      const a = document.activeElement;
+      if (a && a.tagName === 'INPUT') return;          // 仍在輸入 → 保持 dirty，等 focusout
+      if (ctab !== 'list' && ctab !== 'ana') renderBdgPlan();
+    }, 200);
+  }
+  document.addEventListener('focusout', () => { if (_bdgDirty) scheduleBdgRefresh(); });
+
   function renderBdgPlan() {
     const panel = document.getElementById('bdgPlanPanel');
     if (!panel) return;
+    _bdgDirty = false;
     const sp = getBdgSpending();
+    const ym = curYM();
 
-    // 大分類預算 = 細分類加總
-    CKEYS.forEach(k => {
-      const plan = bdgPlan[k];
-      plan.budget = plan.subs.reduce((s, sub) => s + (sub.budget || 0), 0);
-    });
+    // 大分類預算：有細項 = 細項加總；沒有細項 = 直接設定的金額（皆依月份）
+    CKEYS.forEach(k => { bdgPlan[k].budget = catBudgetAt(k, ym); });
 
     let totalBudget = 0, totalSpent = 0;
     CKEYS.forEach(k => {
@@ -2268,8 +2328,9 @@
       let subsHtml = '';
       plan.subs.forEach(s => {
         const ss    = sp[k + ':' + s.id] || 0;
-        const spct  = s.budget > 0 ? Math.min(100, Math.round(ss / s.budget * 100)) : 0;
-        const sOver = s.budget > 0 && ss > s.budget;
+        const sbud  = subBudgetAt(s, ym);
+        const spct  = sbud > 0 ? Math.min(100, Math.round(ss / sbud * 100)) : 0;
+        const sOver = sbud > 0 && ss > sbud;
         subsHtml += `<div class="bdgp-sub-item" data-cat="${k}" data-sid="${s.id}">
           <span class="bdgp-sub-dot" title="按住拖動排序，雙擊刪除"></span>
           <div class="bdgp-sub-main">
@@ -2279,7 +2340,6 @@
                 type="text"
                 value="${esc(s.name)}"
                 maxlength="12"
-                onblur="renameBdgSub('${k}',${s.id},this.value)"
                 onchange="renameBdgSub('${k}',${s.id},this.value)"
                 onclick="event.stopPropagation()"
               >
@@ -2289,15 +2349,14 @@
                 <span class="bdgp-sub-budget-wrap">NT$<input
                   class="bdgp-sub-bdg-inp"
                   type="number" min="0"
-                  value="${s.budget || ''}"
+                  value="${sbud || ''}"
                   placeholder="預算"
-                  onblur="setBdgSubBudget('${k}',${s.id},this.value)"
                   onchange="setBdgSubBudget('${k}',${s.id},this.value)"
                   onclick="event.stopPropagation()"
                 ></span>
               </div>
             </div>
-            ${s.budget > 0 ? `<div class="bdgp-sub-bar-bg"><div class="bdgp-sub-bar-fill${sOver?' over':''}" style="width:${spct}%"></div></div>` : ''}
+            ${sbud > 0 ? `<div class="bdgp-sub-bar-bg"><div class="bdgp-sub-bar-fill${sOver?' over':''}" style="width:${spct}%"></div></div>` : ''}
           </div>
         </div>`;
       });
@@ -2316,12 +2375,18 @@
         <div class="bdgp-item-head" onclick="toggleBdgItem('${k}')" style="cursor:pointer">
           <span class="bdgp-icon">${c.icon}</span>
           <span class="bdgp-name">${esc(c.lbl)}</span>
-          <span class="bdgp-budget-tag">${plan.budget > 0 ? '預算 $'+plan.budget.toLocaleString() : '未設細分'}</span>
+          <span class="bdgp-budget-tag">${plan.budget > 0 ? '預算 $'+plan.budget.toLocaleString() : '未設預算'}</span>
           <span class="bdgp-total${isOver?' over':''}">$${spent.toLocaleString()}</span>
           <span class="bdgp-arrow">${plan.open ? '▴' : '▾'}</span>
         </div>
         ${plan.budget > 0 ? `<div class="bdgp-bar-wrap"><div class="bdgp-bar-bg"><div class="bdgp-bar-fill${isOver?' over':''}" style="width:${pct}%"></div></div></div>` : ''}
         <div class="bdgp-body${plan.open?' open':''}">
+          ${plan.subs.length === 0 ? `<div class="bdgp-budget-row">
+            <span class="bdgp-budget-label">大項目預算</span>
+            <input class="bdgp-budget-inp" type="number" min="0" placeholder="直接輸入預算（或在下方新增細項）"
+              value="${plan.budget || ''}" onclick="event.stopPropagation()"
+              onchange="setBdgBudget('${k}',this.value)">
+          </div>` : ''}
           <div class="bdgp-sub-list">${subsHtml}</div>
           <div class="bdgp-add-row">
             <input class="bdgp-add-inp" id="bdgp-si-${k}" type="text" placeholder="細分類名稱" maxlength="12"
@@ -2345,7 +2410,7 @@
     const plan = bdgPlan[k];
     if (!plan) return;
     const s = plan.subs.find(x => x.id === sid);
-    if (!s || !val.trim()) return;
+    if (!s || !val.trim() || s.name === val.trim()) return;
     s.name = val.trim();
     saveBdgPlan();
   }
@@ -2355,11 +2420,12 @@
     if (!plan) return;
     const s = plan.subs.find(x => x.id === sid);
     if (!s) return;
-    s.budget = parseInt(val, 10) || 0;
+    const ym = curYM();
+    const v  = Math.max(0, parseInt(val, 10) || 0);
+    if (v === subBudgetAt(s, ym)) return;   // 沒變就不存檔、不同步
+    setHist(ym, s.id, v);                   // 只影響本月起，不改動過去月份
     saveBdgPlan();
-    // 只更新 header 顯示，不重新渲染整個面板（避免輸入框焦點丟失）
-    const newTotal = plan.subs.reduce((a, x) => a + (x.budget||0), 0);
-    plan.budget = newTotal;
+    scheduleBdgRefresh();                   // 總覽／進度條稍後自動更新
   }
 
   function toggleBdgItem(k) {
@@ -2368,9 +2434,16 @@
     renderBdgPlan();
   }
 
+  // 沒有細項的大分類：直接設定該分類的預算（有細項時預算 = 細項加總，不可直接設）
   function setBdgBudget(k, val) {
-    bdgPlan[k].budget = parseInt(val, 10) || 0;
+    const plan = bdgPlan[k];
+    if (!plan || plan.subs.length > 0) return;
+    const ym = curYM();
+    const v  = Math.max(0, parseInt(val, 10) || 0);
+    if (v === catBudgetAt(k, ym)) return;
+    setHist(ym, 'cat:' + k, v);
     saveBdgPlan();
+    scheduleBdgRefresh();
   }
 
   function addBdgSub(k) {
@@ -2379,7 +2452,9 @@
     const name   = nameEl ? nameEl.value.trim() : '';
     if (!name) { toast('請輸入細分類名稱'); return; }
     const budget = parseInt(budEl ? budEl.value : '0', 10) || 0;
-    bdgPlan[k].subs.push({ id: _subId++, name, budget });
+    const newId = _subId++;
+    bdgPlan[k].subs.push({ id: newId, name, budget: 0 });
+    if (budget > 0) setHist(curYM(), newId, budget); // 新細項的預算從本月起算
     saveBdgPlan();
     renderBdgPlan();
     toast('已新增：' + name);
@@ -3523,7 +3598,9 @@
   /* ── 分析渲染 ── */
   function renderAna(mrs, total) {
     const ap = document.getElementById('anaPanel');
-    if (mrs.length === 0) {
+    // 預算外支出 = 本月被標成「不計入預算」的記錄加總（不受「顯示：預算內」模式影響）
+    const exemptTotal = getMrs().filter(r => r.exempt).reduce((s, r) => s + r.amt, 0);
+    if (mrs.length === 0 && getMrs().length === 0) {
       ap.innerHTML = '<div class="ana-empty">這個月還沒有記帳 🌸</div>';
       return;
     }
@@ -3573,12 +3650,13 @@
         if (plan.subs.length > 0) {
           plan.subs.forEach(s => {
             const ss    = bdgSp[k + ':' + s.id] || 0;
-            const sOver = s.budget > 0 && ss > s.budget;
-            const sRem  = s.budget > 0 ? s.budget - ss : null;
+            const sbud  = subBudgetAt(s, curYM());
+            const sOver = sbud > 0 && ss > sbud;
+            const sRem  = sbud > 0 ? sbud - ss : null;
             subsHtml += `<div class="ana-sub-row">
               <span class="ana-sub-dot"></span>
               <span class="ana-sub-name">${esc(s.name)}</span>
-              ${s.budget > 0 ? `<span class="ana-sub-budget">$${s.budget.toLocaleString()}</span>` : ''}
+              ${sbud > 0 ? `<span class="ana-sub-budget">$${sbud.toLocaleString()}</span>` : ''}
               <span class="ana-sub-spent${sOver?' over':''}">$${ss.toLocaleString()}</span>
               ${sRem !== null ? `<span class="ana-sub-rem${sOver?' over':''}">剩$${Math.max(0,sRem).toLocaleString()}</span>` : ''}
             </div>`;
@@ -3590,7 +3668,15 @@
               <span class="ana-sub-spent">$${noSub.toLocaleString()}</span></div>`;
           }
         } else {
-          subsHtml = `<div class="ana-no-sub">尚未設定細分類 → 前往「預算」頁新增</div>`;
+          const cbud = catBudgetAt(k, curYM());
+          const cs   = bdgSp[k] || 0;
+          subsHtml = cbud > 0
+            ? `<div class="ana-sub-row"><span class="ana-sub-dot"></span>
+                <span class="ana-sub-name">大項目預算</span>
+                <span class="ana-sub-budget">$${cbud.toLocaleString()}</span>
+                <span class="ana-sub-spent${cs>cbud?' over':''}">$${cs.toLocaleString()}</span>
+                <span class="ana-sub-rem${cs>cbud?' over':''}">剩$${Math.max(0,cbud-cs).toLocaleString()}</span></div>`
+            : `<div class="ana-no-sub">尚未設定預算 → 前往「預算」頁設定</div>`;
         }
       }
 
@@ -3629,9 +3715,9 @@
         </span>` : '');
 
     ap.innerHTML = `
-      <div class="ana-total">
-        <div class="ana-total-label">本月支出</div>
-        <div class="ana-total-num"><small>NT$</small>${total.toLocaleString()}</div>
+      <div class="ana-total" onclick="toggleAnaExempt()" style="cursor:pointer" title="點一下切換：本月支出 / 預算外支出">
+        <div class="ana-total-label">${anaShowExempt ? '本月預算外支出' : '本月支出'}</div>
+        <div class="ana-total-num${anaShowExempt ? ' exempt-mode' : ''}"><small>NT$</small>${(anaShowExempt ? exemptTotal : total).toLocaleString()}</div>
       </div>
       ${unsplitRemain > 0 ? `<div class="ana-unsplit-banner" onclick="goToUnsplitFilter()">
         <span>✂️ 本月待拆帳尚有 <b>$${unsplitRemain.toLocaleString()}</b> 未分配</span>
@@ -3644,12 +3730,23 @@
       ${cards}`;
   }
 
-  function toggleAnaCard(k) {
-    anaOpen[k] = !anaOpen[k];
+  function rerenderAna() {
     const mrs = getMrs();
     const displayMrs = showBudgetTotal ? mrs.filter(r => !r.exempt) : mrs;
     const displayTotal = displayMrs.reduce((s, r) => s + r.amt, 0);
     renderAna(displayMrs, displayTotal);
+  }
+
+  function toggleAnaCard(k) {
+    anaOpen[k] = !anaOpen[k];
+    rerenderAna();
+  }
+
+  /* 點「本月支出」卡片：在「本月支出」與「預算外支出（粉紅色）」之間切換 */
+  let anaShowExempt = false;
+  function toggleAnaExempt() {
+    anaShowExempt = !anaShowExempt;
+    rerenderAna();
   }
 
   /* ── Toast ── */
@@ -3666,11 +3763,19 @@
   function exportCSV() {
     const activeRecs = recs.filter(r => !r.deleted);
     if (activeRecs.length === 0) { toast('沒有資料可以匯出'); return; }
-    const header = '日期,分類,金額,備註,不計入預算';
+    const header = '日期,分類,金額,備註,不計入預算,預算大項,預算細項';
+    const cell = s => String(s || '').replace(/,/g, '，').replace(/\n/g, ' ');
     const rows = activeRecs.map(r => {
       const c    = CATS[r.cat] || UNCATEGORIZED;
-      const note = (r.note || '').replace(/,/g, '，').replace(/\n/g, ' ');
-      return `${r.date},${c.lbl},${r.amt},${note},${r.exempt ? '是' : ''}`;
+      const note = cell(r.note);
+      const ref  = effBdgRef(r);
+      const bCat = ref ? cell(CATS[ref.catKey].lbl) : '';
+      let bSub = '';
+      if (ref && ref.subId !== undefined) {
+        const sub = (bdgPlan[ref.catKey] && bdgPlan[ref.catKey].subs || []).find(s => s.id === ref.subId);
+        bSub = sub ? cell(sub.name) : '';
+      }
+      return `${r.date},${cell(c.lbl)},${r.amt},${note},${r.exempt ? '是' : ''},${bCat},${bSub}`;
     });
     const csv  = '\uFEFF' + header + '\n' + rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -3692,7 +3797,9 @@
       v: 3,
       ts: Date.now(),
       recs: recs.filter(r => !r.deleted),
-      bdgPlan,
+      bdgPlan,            // 含各月份預算紀錄（_hist）
+      budget,             // 頂部「每月支出上限」
+      showBudgetTotal,
       catsList: CATS_LIST,
       labels: (() => { try { return JSON.parse(localStorage.getItem(SK_LBL) || '{}'); } catch(e) { return {}; } })(),
     };
@@ -3859,6 +3966,9 @@
         recs = [...merged.values()].sort((a, b) => b.id - a.id);
 
         if (data.bdgPlan && typeof data.bdgPlan === 'object') bdgPlan = data.bdgPlan;
+        // 舊備份沒有這兩個欄位 → 不覆蓋現有設定
+        if (typeof data.budget === 'number' && data.budget >= 0) { budget = data.budget; saveBdg(); }
+        if (typeof data.showBudgetTotal === 'boolean') { showBudgetTotal = data.showBudgetTotal; saveMode(); }
         if (Array.isArray(data.catsList) && data.catsList.length > 0) CATS_LIST = data.catsList;
         rebuildCats();
         if (CKEYS.length > 0 && !CKEYS.includes(cat)) cat = CKEYS[0];
