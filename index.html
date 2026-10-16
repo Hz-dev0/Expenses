@@ -271,9 +271,9 @@
       vertical-align: 2px;
       margin-right: 1px;
     }
-    /* 三種顯示模式的顏色：全部 = 原本的顏色；預算內 = 綠；預算外 = 粉紅 */
-    #totalAmt.m1 { color: #5fa38c; }
-    #totalAmt.m2 { color: #ec7fa0; }
+    /* 三種顯示模式的顏色：全部 = 原本的顏色；預算內／預算外 = 分析頁圖形條的柔和色（CAT_C_POOL） */
+    #totalAmt.m1 { color: #b8e8cc; }
+    #totalAmt.m2 { color: #e8b8b8; }
     #totalAmt.over {
       color: var(--danger);
       animation: overPulse .4s ease;
@@ -318,8 +318,8 @@
       transition: opacity .2s, transform .2s;
       white-space: nowrap;
     }
-    #totalModeTip span.m1 { background: rgba(95,163,140,0.92); }
-    #totalModeTip span.m2 { background: rgba(236,127,160,0.92); }
+    #totalModeTip span.m1 { background: #b8e8cc; color: var(--text); }   /* 柔和底色配深色字才看得清楚 */
+    #totalModeTip span.m2 { background: #e8b8b8; color: var(--text); }
     #totalModeTip span.show {
       opacity: 1;
       transform: translateY(0);
