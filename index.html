@@ -621,12 +621,14 @@
       will-change: transform;
     }
     #panelWrap.notransition { transition: none; }
-    /* 切換動畫結束後，非目前分頁收合成 0 高度，避免預算頁下方出現大片空白 */
-    #panelWrap.settled > .swipe-panel:not(.is-active) {
-      height: 0; overflow: hidden; visibility: hidden; padding-top: 0; padding-bottom: 0;
+    /* 非目前分頁：永遠限制在一個螢幕高度並隱藏（只切 visibility，不改高度），
+       這樣開始滑動／動畫結束時不會觸發整份長清單的重新排版 → 不會卡頓 */
+    .swipe-panel:not(.is-active) {
+      max-height: calc(100vh - var(--topbar-h, 0px) - var(--kb-vis, 0px));
+      max-height: calc(100dvh - var(--topbar-h, 0px) - var(--kb-vis, 0px));
+      overflow: hidden; visibility: hidden;
     }
-    /* 滑動／切換期間，被滑進來的分頁只需要畫一個螢幕高度，避免一開始滑就要畫整份長清單而卡一下 */
-    .swipe-panel.peek:not(.is-active) { max-height: 100vh; max-height: 100dvh; overflow: hidden; }
+    .swipe-panel.vis:not(.is-active) { visibility: visible; }
     .swipe-panel {
       width: 33.333%;
       flex-shrink: 0;
@@ -3970,23 +3972,16 @@
     setTimeout(() => panel.classList.remove(cls), 300);
   }
 
-  /* ── 分頁高度：動畫結束後把非目前分頁收合（避免被最長的分頁撐出空白） ── */
-  let _settleTimer = null;
+  /* ── 分頁顯示：非目前分頁平常隱藏，滑動／切換期間才顯示（只改 visibility，不觸發排版） ── */
+  let _settleTimer = null, _activeTimer = null;
   function unsettlePanels() {
     clearTimeout(_settleTimer);
-    const w = document.getElementById('panelWrap');
-    if (w) {
-      w.classList.remove('settled');
-      w.querySelectorAll('.swipe-panel:not(.is-active)').forEach(p => p.classList.add('peek'));
-    }
+    document.querySelectorAll('#panelWrap > .swipe-panel').forEach(p => p.classList.add('vis'));
   }
   function settlePanels(ms) {
     clearTimeout(_settleTimer);
     const apply = () => {
-      const w = document.getElementById('panelWrap');
-      if (!w) return;
-      w.classList.add('settled');
-      w.querySelectorAll('.peek').forEach(p => p.classList.remove('peek'));
+      document.querySelectorAll('#panelWrap > .swipe-panel').forEach(p => p.classList.remove('vis'));
     };
     if (ms > 0) _settleTimer = setTimeout(apply, ms); else apply();
   }
@@ -4001,23 +3996,26 @@
   /* ── 切換 Tab ── */
   function goTab(t) {
     if (ctab === t) return;
+    // 上一次切換還沒完成「換成 active」就又切了：先把它完成
+    clearTimeout(_activeTimer);
+    markActivePanel(ctab);
     ctab = t;
     unsettlePanels();
-    markActivePanel(t);
-    settlePanels(380);
+    settlePanels(420);
+    // 「換成 active」（解除高度限制，會讓長清單重新排版）延到動畫結束後，才不會在動畫起跑時卡一下
+    _activeTimer = setTimeout(() => { if (ctab === t) markActivePanel(t); }, 330);
     document.getElementById('tabList').classList.toggle('on', t === 'list');
     document.getElementById('tabAna').classList.toggle('on', t === 'ana');
     document.getElementById('tabBdgPlan').classList.toggle('on', t === 'bdgplan');
-    // 先更新 transform（讓動畫立即啟動），下一幀才渲染內容（避免阻塞動畫）
+    // 先更新 transform（讓動畫立即啟動），動畫結束後才渲染內容（避免阻塞動畫）
     const wrap = document.getElementById('panelWrap');
     if (wrap) {
       if (t === 'list')     wrap.style.transform = 'translateX(0)';
       else if (t === 'ana') wrap.style.transform = 'translateX(-33.333%)';
       else                  wrap.style.transform = 'translateX(-66.666%)';
     }
-    // 重畫內容會卡住主執行緒，若跟切換動畫同時進行，動畫會卡在一半。
     //  - 這個分頁從沒畫過（空的）→ 馬上畫，不然滑進來會是空白
-    //  - 已經有內容 → 等動畫結束(約 320ms)再更新；內容沒變就不重建 DOM（見 installHTMLGuard）
+    //  - 已經有內容 → 等動畫結束再更新；內容沒變就不重建 DOM（見 installHTMLGuard）
     const target = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' }[t];
     const tEl = document.getElementById(target);
     if (!tEl || !tEl.innerHTML) {
@@ -4028,7 +4026,7 @@
         if (ctab !== t) return;
         _guardHTML = true;
         try { render(); } finally { _guardHTML = false; }
-      }, 340);
+      }, 345);
     }
   }
 
