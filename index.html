@@ -1096,6 +1096,21 @@
     .bdgp-item-head { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
     .bdgp-carry { font-size: 10px; color: var(--danger); margin-top: 3px; font-weight: 600; }
     .bdgp-icon { font-size: 22px; flex-shrink: 0; }
+    /* 大分類右側拖曳把手（點一下仍可展開/收合，按住拖動排序） */
+    .bdgp-grip {
+      width: 34px; align-self: stretch; margin: -12px -10px -12px -2px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: none; cursor: grab;
+    }
+    .bdgp-grip::before {
+      content: ''; width: 12px; height: 18px;
+      background-image: radial-gradient(circle, var(--rose) 1.7px, transparent 2.2px);
+      background-size: 6px 6px; transition: transform .12s;
+    }
+    .bdgp-grip:active::before { transform: scale(1.3); }
+    #bdgPlanPanel.sorting .bdgp-body, #bdgPlanPanel.sorting .bdgp-bar-wrap { display: none; }
+    .bdgp-item.dragging { box-shadow: 0 10px 28px rgba(120,80,80,.28); margin: 0; opacity: .96; }
+    .bdgp-item-placeholder { border: 2px dashed var(--rose); border-radius: 16px; margin-bottom: 10px; opacity: .45; box-sizing: border-box; }
     .bdgp-name { flex: 1; font-size: 14px; font-weight: 700; color: var(--text); }
     .bdgp-budget-tag { font-size: 10px; color: var(--muted); font-weight: 500; white-space: nowrap; }
     .bdgp-total { font-family: "Montserrat",sans-serif; font-size: 13px; font-weight: 800; color: var(--roseDk); white-space: nowrap; margin-left: 4px; }
@@ -2253,7 +2268,7 @@
     panel.addEventListener('mouseleave', () => { if (!usingTouch) clear(); });
     // 長按結束後瀏覽器仍會補發 click（會誤觸展開/收合）→ 在捕獲階段吃掉
     panel.addEventListener('click', e => {
-      if (fired) { fired = false; e.stopPropagation(); e.preventDefault(); }
+      if (fired || Date.now() - _catDragEndAt < 400) { fired = false; e.stopPropagation(); e.preventDefault(); }
     }, true);
     panel.addEventListener('contextmenu', e => { if (e.target.closest('.bdgp-item-head')) e.preventDefault(); });
   }
@@ -2530,13 +2545,13 @@
         }
       }
 
-      itemsHtml += `<div class="bdgp-item">
+      itemsHtml += `<div class="bdgp-item" data-cat="${k}">
         <div class="bdgp-item-head" data-cat="${k}" onclick="toggleBdgItem('${k}')" style="cursor:pointer" title="長按編輯分類">
           <span class="bdgp-icon">${c.icon}</span>
           <span class="bdgp-name">${esc(catLbl(k, ym))}</span>
           <span class="bdgp-total${isOver?' over':''}">$${spent.toLocaleString()}</span>
           <span class="bdgp-budget-tag" style="margin-left:-7px">/ ${hasBud ? fmtMoney(ebud) : '未設預算'}</span>
-          <span class="bdgp-arrow">${plan.open ? '▴' : '▾'}</span>
+          <span class="bdgp-grip" title="按住拖動排序"></span>
         </div>
         ${hasBud ? `<div class="bdgp-bar-wrap"><div class="bdgp-bar-bg"><div class="bdgp-bar-fill${isOver?' over':''}" style="width:${pct}%"></div></div></div>` : ''}
         <div class="bdgp-body${plan.open?' open':''}">
@@ -2563,6 +2578,7 @@
     </div>${summaryHtml}${itemsHtml}`;
 
     setupSubDotHandlers(panel);
+    setupCatGripHandlers(panel);
   }
 
   function renameBdgSub(k, sid, val) {
@@ -2729,6 +2745,113 @@
         confirmDelBdgSub(item.dataset.cat, +item.dataset.sid);
       });
     });
+  }
+
+  /* ── 大分類拖曳排序：按住右側把手 → 其他分類收起 → 拖到定位 → 存回 CATS_LIST（記帳區圖示順序同步） ── */
+  let _catDrag = null;
+  let _catDragEndAt = 0;
+
+  function setupCatGripHandlers(panel) {
+    panel.querySelectorAll('.bdgp-grip').forEach(grip => {
+      let timer = null, sx = 0, sy = 0;
+      const itemEl = () => grip.closest('.bdgp-item');
+      const clear = () => { clearTimeout(timer); timer = null; };
+      const begin = (y) => { const it = itemEl(); if (it) startCatDrag(it, y); };
+
+      grip.addEventListener('touchstart', e => {
+        e.stopPropagation();                    // 不要觸發「長按標題 → 編輯分類」和左右滑動分頁
+        const t = e.touches[0]; sx = t.clientX; sy = t.clientY;
+        clear();
+        timer = setTimeout(() => { timer = null; begin(sy); }, DOT_LONGPRESS_MS);
+      }, { passive: true });
+      grip.addEventListener('touchmove', e => {
+        const t = e.touches[0];
+        if (_catDrag) { e.preventDefault(); moveCatDrag(t.clientY); return; }
+        if (Math.abs(t.clientX - sx) > DOT_DRAG_MOVE_TOLERANCE || Math.abs(t.clientY - sy) > DOT_DRAG_MOVE_TOLERANCE) clear();
+      }, { passive: false });
+      const endTouch = cancelled => { clear(); if (_catDrag) endCatDrag(cancelled); };
+      grip.addEventListener('touchend',    () => endTouch(false), { passive: true });
+      grip.addEventListener('touchcancel', () => endTouch(true),  { passive: true });
+
+      // 桌機滑鼠
+      grip.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        sy = e.clientY; clear();
+        timer = setTimeout(() => { timer = null; begin(sy); }, DOT_LONGPRESS_MS);
+        const mv = ev => { if (_catDrag) moveCatDrag(ev.clientY); };
+        const up = () => {
+          clear();
+          document.removeEventListener('mousemove', mv);
+          document.removeEventListener('mouseup', up);
+          if (_catDrag) endCatDrag(false);
+        };
+        document.addEventListener('mousemove', mv);
+        document.addEventListener('mouseup', up);
+      });
+    });
+  }
+
+  function startCatDrag(itemEl, clientY) {
+    const panel = document.getElementById('bdgPlanPanel');
+    if (!panel) return;
+    panel.classList.add('sorting');             // 先收起所有分類，清單變短比較好拖
+    const rect = itemEl.getBoundingClientRect(); // 收起後再量位置
+    const placeholder = document.createElement('div');
+    placeholder.className = 'bdgp-item-placeholder';
+    placeholder.style.height = rect.height + 'px';
+    itemEl.after(placeholder);
+
+    itemEl.classList.add('dragging');
+    itemEl.style.position = 'fixed';
+    itemEl.style.left = rect.left + 'px';
+    itemEl.style.top = rect.top + 'px';
+    itemEl.style.width = rect.width + 'px';
+    itemEl.style.zIndex = '999';
+    document.body.appendChild(itemEl);
+
+    _catDrag = { itemEl, placeholder, panel, offsetY: rect.height / 2 };
+    moveCatDrag(clientY);
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+  }
+
+  function moveCatDrag(clientY) {
+    if (!_catDrag) return;
+    const { itemEl, placeholder, panel, offsetY } = _catDrag;
+    const top = clientY - offsetY;
+    itemEl.style.top = top + 'px';
+    const center = top + itemEl.getBoundingClientRect().height / 2;
+    let target = null;
+    for (const sib of panel.querySelectorAll(':scope > .bdgp-item')) {
+      const r = sib.getBoundingClientRect();
+      if (center < r.top + r.height / 2) { target = sib; break; }
+    }
+    if (target) { if (target.previousElementSibling !== placeholder) panel.insertBefore(placeholder, target); }
+    else if (panel.lastElementChild !== placeholder) panel.appendChild(placeholder);
+  }
+
+  function endCatDrag(cancelled) {
+    if (!_catDrag) return;
+    const { itemEl, placeholder, panel } = _catDrag;
+    _catDrag = null;
+    _catDragEndAt = Date.now();
+    itemEl.classList.remove('dragging');
+    ['position', 'left', 'top', 'width', 'zIndex'].forEach(p => { itemEl.style[p] = ''; });
+    placeholder.replaceWith(itemEl);
+    panel.classList.remove('sorting');
+    if (!cancelled) {
+      const order = [...panel.querySelectorAll(':scope > .bdgp-item')].map(el => el.dataset.cat);
+      const byKey = new Map(CATS_LIST.map(c => [c.key, c]));
+      const next = order.map(k => byKey.get(k)).filter(Boolean);
+      CATS_LIST.forEach(c => { if (!next.includes(c)) next.push(c); });   // 防止遺漏
+      if (next.some((c, i) => c !== CATS_LIST[i])) {
+        CATS_LIST = next;
+        rebuildCats();
+        saveCats();
+        renderCatBtns();                         // 記帳區右側圖示順序同步
+      }
+    }
+    renderBdgPlan();
   }
 
   function startSubDrag(itemEl, clientY) {
