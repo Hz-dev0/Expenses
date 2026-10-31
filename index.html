@@ -4035,7 +4035,10 @@
     });
 
     // 本月各細分類實際花費（透過 bdgRef）— 在展開時按需計算
-    const segs = CKEYS.map((k, i) => {
+    // 色彩條與下方卡片同一個順序（金額多到少）；顏色仍依分類本身的位置，不會跟著變
+    const sorted = [...CKEYS].sort((a, b) => tv[b] - tv[a]);
+    const segs = sorted.map(k => {
+      const i = CKEYS.indexOf(k);
       const pct = total > 0 ? (tv[k] / total * 100) : 0;
       return pct > 0
         ? `<div class="stack-seg" style="width:${pct.toFixed(1)}%;background:${catColor(i)}"></div>`
@@ -4043,8 +4046,6 @@
     }).join('') + (uncategorizedTotal > 0 && total > 0
       ? `<div class="stack-seg" style="width:${(uncategorizedTotal/total*100).toFixed(1)}%;background:#c9bdb5"></div>`
       : '');
-
-    const sorted = [...CKEYS].sort((a, b) => tv[b] - tv[a]);
 
     const aym   = curYM();
     const carry = getCarry(aym);
