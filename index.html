@@ -199,15 +199,19 @@
     }
 
     html { background: var(--bg1); }
+    /* 漸層背景放在獨立的固定圖層，滑動／捲動時不必重畫（原本的 background-attachment: fixed 在手機上很吃力） */
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background: linear-gradient(170deg, var(--bg1) 0%, var(--bg2) 100%);
+    }
 
     body {
       font-family: "Noto Sans TC", sans-serif;
-      background: linear-gradient(170deg, var(--bg1) 0%, var(--bg2) 100%);
-      background-attachment: fixed;
       color: var(--text);
       min-height: 100vh;
       min-height: 100dvh;   /* 手機網址列會讓 100vh 比可視高度大，導致空白頁也能捲動 */
       overflow-x: hidden;
+      touch-action: pan-y;   /* 橫向手勢交給 JS（切換分頁），避免被瀏覽器當成捲動而中斷 */
       -webkit-user-select: none;
       user-select: none;
       --kb-vis: var(--kb-h);               /* 鍵盤目前露出的高度 */
@@ -364,13 +368,7 @@
     .tb.on { background: var(--rose); color: #fff; box-shadow: 0 2px 8px var(--shd); }
 
     /* ── SCROLL ── */
-    #scrollArea {
-      padding: 0;
-      /* 撐滿標題列與記帳區之間（扣掉 body 的 padding-bottom，多扣 2px 避免小數誤差造成多出一截） */
-      min-height: calc(100vh - var(--topbar-h, 120px) - var(--kb-vis) - 10px);
-      min-height: calc(100dvh - var(--topbar-h, 120px) - var(--kb-vis) - 10px);
-      touch-action: pan-y;   /* 橫向手勢交給 JS（切換分頁），避免瀏覽器把斜向滑動當成捲動而中斷 */
-    }
+    #scrollArea { padding: 0; }
 
     /* ── LIST ── */
     .dg-head {
@@ -3590,6 +3588,8 @@
     setupMonthSwipe();
     setupKbCollapse();
     setupTopBar();
+    installHTMLGuard('listPanel');
+    installHTMLGuard('anaPanel');
 
     // 數字鍵盤：touchstart event delegation（只綁在數字鍵區域，不要綁在整個 kbGrid，
     // 否則 { passive:false } 會讓瀏覽器對右側可捲動分類清單也要等 JS 跑完才能決定要不要捲動，導致卡頓/無法捲動）
@@ -4015,7 +4015,41 @@
       else if (t === 'ana') wrap.style.transform = 'translateX(-33.333%)';
       else                  wrap.style.transform = 'translateX(-66.666%)';
     }
-    requestAnimationFrame(() => render());
+    // 重畫內容會卡住主執行緒，若跟切換動畫同時進行，動畫會卡在一半。
+    //  - 這個分頁從沒畫過（空的）→ 馬上畫，不然滑進來會是空白
+    //  - 已經有內容 → 等動畫結束(約 320ms)再更新；內容沒變就不重建 DOM（見 installHTMLGuard）
+    const target = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' }[t];
+    const tEl = document.getElementById(target);
+    if (!tEl || !tEl.innerHTML) {
+      requestAnimationFrame(() => render());
+    } else {
+      clearTimeout(_tabRenderTimer);
+      _tabRenderTimer = setTimeout(() => {
+        if (ctab !== t) return;
+        _guardHTML = true;
+        try { render(); } finally { _guardHTML = false; }
+      }, 340);
+    }
+  }
+
+  // 明細／分析面板：切換分頁時若新內容和上次完全相同，就略過 innerHTML 重建（省下大量 DOM 建立與重繪）
+  // 只有切換分頁的那次重畫會略過；一般的資料更新仍然照常重建。預算頁有拖曳排序會直接動 DOM，所以不套用。
+  let _guardHTML = false, _tabRenderTimer = null;
+  function installHTMLGuard(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    let last = null;
+    Object.defineProperty(el, 'innerHTML', {
+      configurable: true,
+      get() { return d.get.call(this); },
+      set(v) {
+        v = String(v);
+        if (_guardHTML && v === last) return;
+        last = v;
+        d.set.call(this, v);
+      }
+    });
   }
 
   /* ── 折疊日期群組 ── */
@@ -4777,7 +4811,11 @@
     // 目前 tab 對應的 translateX 基準值
     const baseX = () => -tabOrder.indexOf(ctab) * 33.333;
 
-    area.addEventListener('touchstart', e => {
+    document.addEventListener('touchstart', e => {
+      // 只處理內容區與空白處；標題列、記帳區、彈窗、輸入框、子分類面板都不算
+      tracking = false;
+      if (e.touches.length !== 1) return;
+      if (e.target.closest('#topBar, #kb, .sub-pop, [id$="Overlay"], input, textarea, select')) return;
       sx = e.touches[0].clientX;
       sy = e.touches[0].clientY;
       tracking = true;
@@ -4786,7 +4824,7 @@
       // 先不動 transition，等確認是水平滑才關
     }, { passive: true });
 
-    area.addEventListener('touchmove', e => {
+    document.addEventListener('touchmove', e => {
       if (!tracking) return;
       const dx = e.touches[0].clientX - sx;
       const dy = e.touches[0].clientY - sy;
@@ -4845,8 +4883,8 @@
       }
     };
 
-    area.addEventListener('touchend',    endSwipe, { passive: true });
-    area.addEventListener('touchcancel', () => {
+    document.addEventListener('touchend',    endSwipe, { passive: true });
+    document.addEventListener('touchcancel', () => {
       tracking = false;
       const w = getWrap();
       if (w) {
