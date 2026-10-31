@@ -215,6 +215,17 @@
     }
     body.kb-collapsed { --kb-vis: var(--kb-bar-h); }
 
+
+    /* ── 固定標題列（月份／總額／分頁標籤）：用 fixed 而不是 sticky，iOS 下拉回彈時也不會跟著晃 ── */
+    #topBar {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 90;                      /* 低於記帳區(100)與各種彈窗 */
+      background: var(--bg1);
+      box-shadow: 0 4px 12px -6px rgba(200,150,150,0.28);
+    }
+    #topBarSpacer { height: 120px; }    /* 預設高度，實際高度由 JS 量測後覆蓋 */
+    html, body { overscroll-behavior-y: none; }
+
     /* ── TOP ── */
     #top {
       padding: max(env(safe-area-inset-top, 20px), 20px) 18px 12px;
@@ -1556,6 +1567,8 @@
   </div>
 </div>
 
+<!-- 固定標題列：月份／總額 + 明細・分析・預算標籤，往下捲紀錄時固定在頁面頂端 -->
+<div id="topBar">
 <!-- TOP BAR -->
 <div id="top">
   <div>
@@ -1581,6 +1594,8 @@
   <button class="tb"    id="tabAna">分析</button>
   <button class="tb"    id="tabBdgPlan">預算</button>
 </div>
+</div>
+<div id="topBarSpacer"></div>
 
 <!-- SCROLL AREA with swipe support -->
 <div id="scrollArea">
@@ -3566,6 +3581,7 @@
     setupBdgHeadLongPress();
     setupMonthSwipe();
     setupKbCollapse();
+    setupTopBar();
 
     // 數字鍵盤：touchstart event delegation（只綁在數字鍵區域，不要綁在整個 kbGrid，
     // 否則 { passive:false } 會讓瀏覽器對右側可捲動分類清單也要等 JS 跑完才能決定要不要捲動，導致卡頓/無法捲動）
@@ -4823,6 +4839,18 @@
       }
       settlePanels(380);
     }, { passive: true });
+  }
+
+
+  /* ── 固定標題列高度 → 撐出同高的空位，避免內容被蓋住 ── */
+  function setupTopBar() {
+    const bar = document.getElementById('topBar');
+    const sp  = document.getElementById('topBarSpacer');
+    if (!bar || !sp) return;
+    const sync = () => { sp.style.height = bar.offsetHeight + 'px'; };
+    sync();
+    if (window.ResizeObserver) new ResizeObserver(sync).observe(bar);
+    window.addEventListener('resize', sync);
   }
 
   /* ── Swipe on top bar for month ── */
