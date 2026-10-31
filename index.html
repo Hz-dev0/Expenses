@@ -3664,6 +3664,54 @@
     }, { passive: true });
     zone.addEventListener('touchcancel', () => { startY = null; }, { passive: true });
 
+    // 明細頁上滑 → 叫出記帳區（記帳區收起時）
+    //   ① 清單已捲到底（或內容不滿一頁）時，往上滑一下
+    //   ② 從畫面最下方一小塊區域開始往上滑
+    //   ③ 任何位置「快速上甩」（慢慢捲清單不會觸發）
+    const OVERLAY_SEL = '#renameOverlay.open, #budgetOverlay.open, #editNoteOverlay.open, #monthPickerOverlay.open, #emojiOverlay.open, #treeOverlay.open, #splitOverlay.open';
+    const SWIPE_UP_MIN  = 40;     // ①② 往上至少滑多少 px
+    const BOTTOM_ZONE   = 140;    // ② 底部觸發區高度 px
+    const FLICK_MIN_DY  = 50;     // ③ 快速上甩：至少滑多少 px
+    const FLICK_SPEED   = 1.0;    // ③ 放開前的速度（px/ms）；越大越要用力甩，覺得太容易誤觸就調高、太難觸發就調低
+    let upSX = 0, upSY = 0, upTrack = false, upZone = false, upPts = [];
+    document.addEventListener('touchstart', e => {
+      upTrack = false; upZone = false; upPts = [];
+      if (kbOpen || ctab !== 'list' || e.touches.length !== 1) return;
+      if (e.target.closest('#kb, input, textarea, select')) return;
+      if (document.querySelector(OVERLAY_SEL)) return;
+      const t = e.touches[0];
+      upSX = t.clientX; upSY = t.clientY;
+      const el = document.scrollingElement || document.documentElement;
+      const atBottom = el.scrollTop + window.innerHeight >= el.scrollHeight - 4;
+      const inBottomZone = upSY > window.innerHeight - BOTTOM_ZONE;
+      upZone = atBottom || inBottomZone;
+      upTrack = true;
+      upPts = [{ y: t.clientY, t: e.timeStamp }];
+    }, { passive: true });
+    document.addEventListener('touchmove', e => {
+      if (!upTrack) return;
+      upPts.push({ y: e.touches[0].clientY, t: e.timeStamp });
+      if (upPts.length > 12) upPts.shift();
+    }, { passive: true });
+    document.addEventListener('touchend', e => {
+      if (!upTrack) return;
+      upTrack = false;
+      if (kbOpen) return;
+      const t = e.changedTouches[0];
+      const dy = t.clientY - upSY, dx = t.clientX - upSX;
+      if (Math.abs(dy) <= Math.abs(dx) * 1.5) return;          // 要偏直向，橫滑切分頁不受影響
+      if (upZone && dy < -SWIPE_UP_MIN) { setKb(true); return; }
+      // 快速上甩：看放開前最後 ~100ms 的速度
+      if (dy < -FLICK_MIN_DY && upPts.length >= 2) {
+        const last = upPts[upPts.length - 1];
+        let first = upPts[0];
+        for (const p of upPts) { if (last.t - p.t <= 100) { first = p; break; } }
+        const dt = last.t - first.t;
+        if (dt > 0 && (first.y - last.y) / dt >= FLICK_SPEED) setKb(true);
+      }
+    }, { passive: true });
+    document.addEventListener('touchcancel', () => { upTrack = false; }, { passive: true });
+
     // 點鍵盤以外的地方 → 收起（不攔截事件，點到的東西照常作用）
     document.addEventListener('pointerdown', e => {
       if (kbOpen && !e.target.closest('#kb')) setKb(false);
