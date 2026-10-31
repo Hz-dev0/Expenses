@@ -600,11 +600,16 @@
     }
     #panelWrap {
       display: flex;
+      align-items: flex-start;   /* 各分頁依自己的內容高度，不被最長的分頁撐高 */
       width: 300%;
       transition: transform .32s cubic-bezier(.4,0,.2,1);
       will-change: transform;
     }
     #panelWrap.notransition { transition: none; }
+    /* 切換動畫結束後，非目前分頁收合成 0 高度，避免預算頁下方出現大片空白 */
+    #panelWrap.settled > .swipe-panel:not(.is-active) {
+      height: 0; overflow: hidden; visibility: hidden; padding-top: 0; padding-bottom: 0;
+    }
     .swipe-panel {
       width: 33.333%;
       flex-shrink: 0;
@@ -1088,6 +1093,8 @@
       padding: 12px 14px;
       gap: 10px;
     }
+    .bdgp-item-head { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+    .bdgp-carry { font-size: 10px; color: var(--danger); margin-top: 3px; font-weight: 600; }
     .bdgp-icon { font-size: 22px; flex-shrink: 0; }
     .bdgp-name { flex: 1; font-size: 14px; font-weight: 700; color: var(--text); }
     .bdgp-budget-tag { font-size: 10px; color: var(--muted); font-weight: 500; white-space: nowrap; }
@@ -1923,11 +1930,31 @@
     CATS = {};
     CKEYS.length = 0;
     CATS_LIST.forEach(c => {
-      CATS[c.key] = { icon: c.icon, lbl: c.lbl };
+      CATS[c.key] = { icon: c.icon, lbl: c.lbl, hist: c.hist };
       CKEYS.push(c.key);
     });
     CATS[UNSPLIT_KEY] = { icon: UNSPLIT_CAT.icon, lbl: UNSPLIT_CAT.lbl };
   };
+
+  /* ── 名稱歷史：改名只影響「改名當月起」，過去月份的紀錄仍顯示當時的名稱 ──
+     hist = { '0000-00': 最早的舊名, 'YYYY-MM': 該月起的名稱 }；某月的名稱 = 不晚於該月的最近一筆 */
+  const todayYM = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+  function histName(hist, base, ym) {
+    if (!hist || !ym) return base;
+    let best = null;
+    for (const m in hist) if (m <= ym && (best === null || m > best)) best = m;
+    return best === null ? base : hist[best];
+  }
+  function pushNameHist(obj, field, newVal) {
+    const old = obj[field];
+    if (old === newVal) return false;
+    if (!obj.hist) obj.hist = { '0000-00': old };
+    obj.hist[todayYM()] = newVal;
+    obj[field] = newVal;
+    return true;
+  }
+  const catLbl = (k, ym) => { const c = CATS[k]; return c ? histName(c.hist, c.lbl, ym) : UNCATEGORIZED.lbl; };
+  const subName = (s, ym) => histName(s.hist, s.name, ym);
 
   const fmtD = d =>
     d.getFullYear() + '-' +
@@ -2041,9 +2068,9 @@
     const val = document.getElementById('renameInput').value.trim();
     if (!val) { toast('名稱不能為空'); return; }
     if (renameTarget) {
-      CATS[renameTarget].lbl = val;
       const c = findCat(renameTarget);
-      if (c) c.lbl = val;
+      if (c) pushNameHist(c, 'lbl', val);   // 只從本月起換新名稱，過去月份保留舊名
+      rebuildCats();
       saveCats();
       renderCatBtns();
       toast('已更新：' + val);
@@ -2197,6 +2224,40 @@
 
   }
 
+  /* ── 預算頁：長按大分類標題 → 開啟「編輯分類」視窗（和記帳區的分類按鈕一樣） ── */
+  function setupBdgHeadLongPress() {
+    const panel = document.getElementById('bdgPlanPanel');
+    if (!panel) return;
+    let timer = null, fired = false, usingTouch = false, sx = 0, sy = 0;
+    const clear = () => { clearTimeout(timer); timer = null; };
+    const start = (e, x, y) => {
+      const head = e.target.closest('.bdgp-item-head');
+      if (!head || !head.dataset.cat) return;
+      fired = false; sx = x; sy = y; clear();
+      timer = setTimeout(() => {
+        timer = null; fired = true;
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+        openRename(head.dataset.cat);
+      }, 480);
+    };
+    const move = (x, y) => { if (timer && (Math.abs(x - sx) > 10 || Math.abs(y - sy) > 10)) clear(); };
+    const end = () => { clear(); setTimeout(() => { fired = false; }, 400); };
+
+    panel.addEventListener('touchstart', e => { usingTouch = true; const t = e.touches[0]; start(e, t.clientX, t.clientY); }, { passive: true });
+    panel.addEventListener('touchmove',  e => { const t = e.touches[0]; move(t.clientX, t.clientY); }, { passive: true });
+    panel.addEventListener('touchend',    () => { end(); setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
+    panel.addEventListener('touchcancel', () => { end(); setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
+    panel.addEventListener('mousedown', e => { if (usingTouch) return; start(e, e.clientX, e.clientY); });
+    panel.addEventListener('mousemove', e => { if (!usingTouch) move(e.clientX, e.clientY); });
+    panel.addEventListener('mouseup',    () => { if (!usingTouch) end(); });
+    panel.addEventListener('mouseleave', () => { if (!usingTouch) clear(); });
+    // 長按結束後瀏覽器仍會補發 click（會誤觸展開/收合）→ 在捕獲階段吃掉
+    panel.addEventListener('click', e => {
+      if (fired) { fired = false; e.stopPropagation(); e.preventDefault(); }
+    }, true);
+    panel.addEventListener('contextmenu', e => { if (e.target.closest('.bdgp-item-head')) e.preventDefault(); });
+  }
+
   /* ── 未關聯過濾模式 ── */
   let listFilterUnlinked = false;
   let listFilterUnsplitOnly = false;
@@ -2302,6 +2363,64 @@
     return histLookup('cat:' + k, ym, plan.own || 0);
   }
 
+  /* ── 超支結轉 ──
+     某個預算單位（沒細項的大分類，或有細項分類底下的「每個細項」）上個月若超支（剩餘為負），
+     這個負數會從本月預算扣掉；若本月又超支就繼續往下個月帶，沒超支（或沒設預算）就歸零。
+     有細項的分類：各細項各自結轉，大分類預算 = 細項（含結轉）加總；「未指定細項」的花費不結轉。
+     只有結轉起始月（預設 2026-10，可用 bdgPlan._meta.carryFrom 覆寫）之後才會結轉。 */
+  const CARRY_START_DEFAULT = '2026-10';
+  const nextYM = ym => { let [y, m] = ym.split('-').map(Number); m++; if (m > 12) { m = 1; y++; } return y + '-' + String(m).padStart(2, '0'); };
+
+  function monthlySpendMap() {
+    const out = {};
+    recs.forEach(r => {
+      if (r.deleted || r.exempt) return;
+      const ref = effBdgRef(r);
+      if (!ref) return;
+      const ym = (r.date || '').slice(0, 7);
+      if (ym.length < 7) return;
+      const m = out[ym] || (out[ym] = {});
+      m[ref.catKey] = (m[ref.catKey] || 0) + r.amt;
+      if (ref.subId !== undefined) { const sk = ref.catKey + ':' + ref.subId; m[sk] = (m[sk] || 0) + r.amt; }
+    });
+    return out;
+  }
+
+  // 回傳「帶進 ym 月」的結轉：{ catKey 或 'catKey:subId': 負數 }
+  function getCarry(ym) {
+    const start = (bdgPlan._meta && bdgPlan._meta.carryFrom) || CARRY_START_DEFAULT;
+    if (!(ym > start)) return {};
+    const spend = monthlySpendMap();
+    let carry = {}, m = start, guard = 0;
+    while (m < ym && guard++ < 240) {
+      const sp = spend[m] || {}, next = {};
+      CKEYS.forEach(k => {
+        const plan = bdgPlan[k];
+        if (!plan) return;
+        const units = plan.subs.length > 0
+          ? plan.subs.map(s => ({ id: k + ':' + s.id, base: subBudgetAt(s, m) }))
+          : [{ id: k, base: catBudgetAt(k, m) }];
+        units.forEach(u => {
+          if (u.base <= 0) return;                       // 當月沒設預算 → 不結轉
+          const rem = u.base + (carry[u.id] || 0) - (sp[u.id] || 0);
+          if (rem < 0) next[u.id] = rem;
+        });
+      });
+      carry = next;
+      m = nextYM(m);
+    }
+    return carry;
+  }
+  const subBudgetEff = (k, s, ym, carry) => { const b = subBudgetAt(s, ym); return b > 0 ? b + (carry[k + ':' + s.id] || 0) : 0; };
+  function catBudgetEff(k, ym, carry) {
+    const plan = bdgPlan[k];
+    if (!plan) return 0;
+    if (plan.subs.length > 0) return plan.subs.reduce((a, s) => a + subBudgetEff(k, s, ym, carry), 0);
+    const b = catBudgetAt(k, ym);
+    return b > 0 ? b + (carry[k] || 0) : 0;
+  }
+  const fmtMoney = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString();
+
   // 編輯預算後延後重繪：輸入框還有焦點就先不畫（避免焦點丟失），失焦後再補畫
   let _bdgDirty = false, _bdgRefreshTimer = null;
   function scheduleBdgRefresh() {
@@ -2322,12 +2441,15 @@
     const sp = getBdgSpending();
     const ym = curYM();
 
-    // 大分類預算：有細項 = 細項加總；沒有細項 = 直接設定的金額（皆依月份）
-    CKEYS.forEach(k => { bdgPlan[k].budget = catBudgetAt(k, ym); });
-
-    let totalBudget = 0, totalSpent = 0;
+    // 大分類預算：有細項 = 細項加總；沒有細項 = 直接設定的金額（皆依月份），再扣掉上月結轉的超支
+    const carry = getCarry(ym);
+    const cbEff = {}, cbBase = {};
+    let totalBudget = 0, totalSpent = 0, totalBase = 0;
     CKEYS.forEach(k => {
-      totalBudget += bdgPlan[k].budget || 0;
+      cbBase[k] = catBudgetAt(k, ym);
+      cbEff[k]  = catBudgetEff(k, ym, carry);
+      totalBase   += cbBase[k];
+      totalBudget += cbEff[k];
       totalSpent  += sp[k] || 0;
     });
     const rem = totalBudget - totalSpent;
@@ -2335,17 +2457,17 @@
     const summaryHtml = `<div class="bdgp-summary">
       <div class="bdgp-sum-col">
         <div class="bdgp-sum-label">本月總預算</div>
-        <div class="bdgp-sum-val">${totalBudget > 0 ? '$' + totalBudget.toLocaleString() : '—'}</div>
+        <div class="bdgp-sum-val">${totalBase > 0 ? fmtMoney(totalBudget) : '—'}</div>
       </div>
       <div class="bdgp-sum-div"></div>
       <div class="bdgp-sum-col">
         <div class="bdgp-sum-label">已使用</div>
-        <div class="bdgp-sum-val${totalBudget>0&&totalSpent>totalBudget?' over':''}">$${totalSpent.toLocaleString()}</div>
+        <div class="bdgp-sum-val${totalBase>0&&totalSpent>totalBudget?' over':''}">$${totalSpent.toLocaleString()}</div>
       </div>
       <div class="bdgp-sum-div"></div>
       <div class="bdgp-sum-col">
         <div class="bdgp-sum-label">剩餘</div>
-        <div class="bdgp-sum-val${totalBudget>0&&rem<0?' over':''}">${totalBudget > 0 ? '$' + Math.max(0,rem).toLocaleString() : '—'}</div>
+        <div class="bdgp-sum-val${totalBase>0&&rem<0?' over':''}">${totalBase > 0 ? '$' + Math.max(0,rem).toLocaleString() : '—'}</div>
       </div>
     </div>`;
 
@@ -2354,16 +2476,19 @@
       const c    = CATS[k];
       const plan = bdgPlan[k];
       const spent = sp[k] || 0;
-      const pct   = plan.budget > 0 ? Math.min(100, Math.round(spent / plan.budget * 100)) : 0;
-      const isOver = plan.budget > 0 && spent > plan.budget;
+      const hasBud = cbBase[k] > 0, ebud = cbEff[k];
+      const pct   = hasBud ? (ebud > 0 ? Math.min(100, Math.round(spent / ebud * 100)) : 100) : 0;
+      const isOver = hasBud && spent > ebud;
 
       // 細分類列（每個可直接編輯預算）
       let subsHtml = '';
       plan.subs.forEach(s => {
         const ss    = sp[k + ':' + s.id] || 0;
-        const sbud  = subBudgetAt(s, ym);
-        const spct  = sbud > 0 ? Math.min(100, Math.round(ss / sbud * 100)) : 0;
-        const sOver = sbud > 0 && ss > sbud;
+        const sbase = subBudgetAt(s, ym);
+        const scar  = sbase > 0 ? (carry[k + ':' + s.id] || 0) : 0;
+        const sbud  = sbase > 0 ? sbase + scar : 0;
+        const spct  = sbase > 0 ? (sbud > 0 ? Math.min(100, Math.round(ss / sbud * 100)) : 100) : 0;
+        const sOver = sbase > 0 && ss > sbud;
         subsHtml += `<div class="bdgp-sub-item" data-cat="${k}" data-sid="${s.id}">
           <span class="bdgp-sub-dot" title="按住拖動排序，雙擊刪除"></span>
           <div class="bdgp-sub-main">
@@ -2371,7 +2496,7 @@
               <input
                 class="bdgp-sub-name-inp"
                 type="text"
-                value="${esc(s.name)}"
+                value="${esc(subName(s, ym))}"
                 maxlength="12"
                 onchange="renameBdgSub('${k}',${s.id},this.value)"
                 onclick="event.stopPropagation()"
@@ -2382,14 +2507,15 @@
                 <span class="bdgp-sub-budget-wrap">NT$<input
                   class="bdgp-sub-bdg-inp"
                   type="number" min="0"
-                  value="${sbud || ''}"
+                  value="${sbase || ''}"
                   placeholder="預算"
                   onchange="setBdgSubBudget('${k}',${s.id},this.value)"
                   onclick="event.stopPropagation()"
                 ></span>
               </div>
             </div>
-            ${sbud > 0 ? `<div class="bdgp-sub-bar-bg"><div class="bdgp-sub-bar-fill${sOver?' over':''}" style="width:${spct}%"></div></div>` : ''}
+            ${scar < 0 ? `<div class="bdgp-carry">↳ 上月超支 ${fmtMoney(scar)} 已從本月預算扣除</div>` : ''}
+            ${sbase > 0 ? `<div class="bdgp-sub-bar-bg"><div class="bdgp-sub-bar-fill${sOver?' over':''}" style="width:${spct}%"></div></div>` : ''}
           </div>
         </div>`;
       });
@@ -2405,21 +2531,21 @@
       }
 
       itemsHtml += `<div class="bdgp-item">
-        <div class="bdgp-item-head" onclick="toggleBdgItem('${k}')" style="cursor:pointer">
+        <div class="bdgp-item-head" data-cat="${k}" onclick="toggleBdgItem('${k}')" style="cursor:pointer" title="長按編輯分類">
           <span class="bdgp-icon">${c.icon}</span>
-          <span class="bdgp-name">${esc(c.lbl)}</span>
+          <span class="bdgp-name">${esc(catLbl(k, ym))}</span>
           <span class="bdgp-total${isOver?' over':''}">$${spent.toLocaleString()}</span>
-          <span class="bdgp-budget-tag" style="margin-left:-7px">/ ${plan.budget > 0 ? '$'+plan.budget.toLocaleString() : '未設預算'}</span>
+          <span class="bdgp-budget-tag" style="margin-left:-7px">/ ${hasBud ? fmtMoney(ebud) : '未設預算'}</span>
           <span class="bdgp-arrow">${plan.open ? '▴' : '▾'}</span>
         </div>
-        ${plan.budget > 0 ? `<div class="bdgp-bar-wrap"><div class="bdgp-bar-bg"><div class="bdgp-bar-fill${isOver?' over':''}" style="width:${pct}%"></div></div></div>` : ''}
+        ${hasBud ? `<div class="bdgp-bar-wrap"><div class="bdgp-bar-bg"><div class="bdgp-bar-fill${isOver?' over':''}" style="width:${pct}%"></div></div></div>` : ''}
         <div class="bdgp-body${plan.open?' open':''}">
           ${plan.subs.length === 0 ? `<div class="bdgp-budget-row">
             <span class="bdgp-budget-label">大項目預算</span>
             <input class="bdgp-budget-inp" type="number" min="0" placeholder="直接輸入預算（或在下方新增細項）"
-              value="${plan.budget || ''}" onclick="event.stopPropagation()"
+              value="${cbBase[k] || ''}" onclick="event.stopPropagation()"
               onchange="setBdgBudget('${k}',this.value)">
-          </div>` : ''}
+          </div>${hasBud && (carry[k] || 0) < 0 ? `<div class="bdgp-carry" style="padding:0 14px 6px">↳ 上月超支 ${fmtMoney(carry[k])} 已從本月預算扣除</div>` : ''}` : ''}
           <div class="bdgp-sub-list">${subsHtml}</div>
           <div class="bdgp-add-row">
             <input class="bdgp-add-inp" id="bdgp-si-${k}" type="text" placeholder="細分類名稱" maxlength="12"
@@ -2444,7 +2570,7 @@
     if (!plan) return;
     const s = plan.subs.find(x => x.id === sid);
     if (!s || !val.trim() || s.name === val.trim()) return;
-    s.name = val.trim();
+    pushNameHist(s, 'name', val.trim());   // 只從本月起換新名稱，過去月份保留舊名
     saveBdgPlan();
   }
 
@@ -3159,6 +3285,9 @@
     setupTotalLongPress();
 
     setupSwipe();
+    markActivePanel(ctab);
+    settlePanels(0);
+    setupBdgHeadLongPress();
     setupMonthSwipe();
     setupKbCollapse();
 
@@ -3476,10 +3605,33 @@
     setTimeout(() => panel.classList.remove(cls), 300);
   }
 
+  /* ── 分頁高度：動畫結束後把非目前分頁收合（避免被最長的分頁撐出空白） ── */
+  let _settleTimer = null;
+  function unsettlePanels() {
+    clearTimeout(_settleTimer);
+    const w = document.getElementById('panelWrap');
+    if (w) w.classList.remove('settled');
+  }
+  function settlePanels(ms) {
+    clearTimeout(_settleTimer);
+    const apply = () => { const w = document.getElementById('panelWrap'); if (w) w.classList.add('settled'); };
+    if (ms > 0) _settleTimer = setTimeout(apply, ms); else apply();
+  }
+  function markActivePanel(t) {
+    const ids = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' };
+    Object.keys(ids).forEach(k => {
+      const el = document.getElementById(ids[k]);
+      if (el) el.classList.toggle('is-active', k === t);
+    });
+  }
+
   /* ── 切換 Tab ── */
   function goTab(t) {
     if (ctab === t) return;
     ctab = t;
+    unsettlePanels();
+    markActivePanel(t);
+    settlePanels(380);
     document.getElementById('tabList').classList.toggle('on', t === 'list');
     document.getElementById('tabAna').classList.toggle('on', t === 'ana');
     document.getElementById('tabBdgPlan').classList.toggle('on', t === 'bdgplan');
@@ -3626,6 +3778,7 @@
       const isCollapsed = !!collapsed[date];
 
       const items = g[date].map(r => {
+        const rym = (r.date || '').slice(0, 7);   // 依紀錄所在月份顯示當時的分類名稱
         const c = CATS[r.cat] || UNCATEGORIZED;
         const isUnsplit = r.cat === UNSPLIT_KEY;
         const remain = isUnsplit ? unsplitRemaining(r) : 0;
@@ -3641,7 +3794,7 @@
           const plan = bdgPlan[r.bdgRef.catKey];
           if (rc && plan) {
             const sub = r.bdgRef.subId !== undefined ? plan.subs.find(s => s.id === r.bdgRef.subId) : null;
-            bdgTag = `<span class="ri-bdg-tag">${rc.icon} ${rc.lbl}${sub ? ' › '+sub.name : ''}</span>`;
+            bdgTag = `<span class="ri-bdg-tag">${rc.icon} ${esc(catLbl(r.bdgRef.catKey, rym))}${sub ? ' › '+esc(subName(sub, rym)) : ''}</span>`;
           }
         }
         let unsplitTag = '';
@@ -3653,8 +3806,8 @@
 
         // 如果已關聯預算分類/子分類，前面不重複顯示分類文字（標籤本身已包含完整資訊），避免「圖示是B、文字卻還是A」的不一致
         const linkedCat = (!isUnsplit && r.bdgRef && r.bdgRef.catKey && CATS[r.bdgRef.catKey]) ? CATS[r.bdgRef.catKey] : null;
-        const plainLbl = linkedCat ? '' : c.lbl;
-        const noteFallbackLbl = linkedCat ? linkedCat.lbl : c.lbl;
+        const plainLbl = linkedCat ? '' : (CATS[r.cat] ? catLbl(r.cat, rym) : c.lbl);
+        const noteFallbackLbl = linkedCat ? catLbl(r.bdgRef.catKey, rym) : (CATS[r.cat] ? catLbl(r.cat, rym) : c.lbl);
 
         const rowAction = isUnsplit ? 'split' : 'tree';
 
@@ -3729,6 +3882,8 @@
 
     const sorted = [...CKEYS].sort((a, b) => tv[b] - tv[a]);
 
+    const aym   = curYM();
+    const carry = getCarry(aym);
     const cards = sorted.map(k => {
       const i    = CKEYS.indexOf(k);
       const c    = CATS[k];
@@ -3744,13 +3899,14 @@
         if (plan.subs.length > 0) {
           plan.subs.forEach(s => {
             const ss    = bdgSp[k + ':' + s.id] || 0;
-            const sbud  = subBudgetAt(s, curYM());
-            const sOver = sbud > 0 && ss > sbud;
-            const sRem  = sbud > 0 ? sbud - ss : null;
+            const sbase = subBudgetAt(s, aym);
+            const sbud  = subBudgetEff(k, s, aym, carry);
+            const sOver = sbase > 0 && ss > sbud;
+            const sRem  = sbase > 0 ? sbud - ss : null;
             subsHtml += `<div class="ana-sub-row">
               <span class="ana-sub-dot"></span>
-              <span class="ana-sub-name">${esc(s.name)}</span>
-              ${sbud > 0 ? `<span class="ana-sub-budget">$${sbud.toLocaleString()}</span>` : ''}
+              <span class="ana-sub-name">${esc(subName(s, aym))}</span>
+              ${sbase > 0 ? `<span class="ana-sub-budget">${fmtMoney(sbud)}</span>` : ''}
               <span class="ana-sub-spent${sOver?' over':''}">$${ss.toLocaleString()}</span>
               ${sRem !== null ? `<span class="ana-sub-rem${sOver?' over':''}">剩$${Math.max(0,sRem).toLocaleString()}</span>` : ''}
             </div>`;
@@ -3762,12 +3918,13 @@
               <span class="ana-sub-spent">$${noSub.toLocaleString()}</span></div>`;
           }
         } else {
-          const cbud = catBudgetAt(k, curYM());
+          const cbase = catBudgetAt(k, aym);
+          const cbud = catBudgetEff(k, aym, carry);
           const cs   = bdgSp[k] || 0;
-          subsHtml = cbud > 0
+          subsHtml = cbase > 0
             ? `<div class="ana-sub-row"><span class="ana-sub-dot"></span>
                 <span class="ana-sub-name">大項目預算</span>
-                <span class="ana-sub-budget">$${cbud.toLocaleString()}</span>
+                <span class="ana-sub-budget">${fmtMoney(cbud)}</span>
                 <span class="ana-sub-spent${cs>cbud?' over':''}">$${cs.toLocaleString()}</span>
                 <span class="ana-sub-rem${cs>cbud?' over':''}">剩$${Math.max(0,cbud-cs).toLocaleString()}</span></div>`
             : `<div class="ana-no-sub">尚未設定預算 → 前往「預算」頁設定</div>`;
@@ -3777,7 +3934,7 @@
       return `<div class="cat-card" onclick="toggleAnaCard('${k}')" style="cursor:pointer">
         <div class="cat-card-top">
           <div class="cat-dot" style="background:${catColor(i)}"></div>
-          <div class="cat-name">${c.icon} ${c.lbl}</div>
+          <div class="cat-name">${c.icon} ${esc(catLbl(k, aym))}</div>
           <div class="cat-pct">${pct}%</div>
           <div class="cat-amt"><small>$</small>${v.toLocaleString()}</div>
           <span style="font-size:9px;color:var(--rose);margin-left:4px">${isOpen ? '▴' : '▾'}</span>
@@ -3801,7 +3958,7 @@
         const i = CKEYS.indexOf(k);
         return `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${catColor(i)}"></span>
-          ${CATS[k].lbl}
+          ${esc(catLbl(k, curYM()))}
         </span>`;
       }).join('') + (uncategorizedTotal > 0 ? `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#c9bdb5"></span>
@@ -3854,13 +4011,14 @@
       const c    = CATS[r.cat] || UNCATEGORIZED;
       const note = cell(r.note);
       const ref  = effBdgRef(r);
-      const bCat = ref ? cell(CATS[ref.catKey].lbl) : '';
+      const rym  = (r.date || '').slice(0, 7);
+      const bCat = ref ? cell(catLbl(ref.catKey, rym)) : '';
       let bSub = '';
       if (ref && ref.subId !== undefined) {
         const sub = (bdgPlan[ref.catKey] && bdgPlan[ref.catKey].subs || []).find(s => s.id === ref.subId);
-        bSub = sub ? cell(sub.name) : '';
+        bSub = sub ? cell(subName(sub, rym)) : '';
       }
-      return `${r.date},${cell(c.lbl)},${r.amt},${note},${r.exempt ? '是' : ''},${bCat},${bSub}`;
+      return `${r.date},${cell(CATS[r.cat] ? catLbl(r.cat, rym) : c.lbl)},${r.amt},${note},${r.exempt ? '是' : ''},${bCat},${bSub}`;
     });
     const csv  = '\uFEFF' + header + '\n' + rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -4205,6 +4363,7 @@
           // 確認是水平滑才關掉 transition，讓 panel 直接跟手
           const w = getWrap();
           if (w) w.classList.add('notransition');
+          unsettlePanels();   // 滑動中兩個分頁都要可見
         }
       }
       if (!isHoriz) return;
@@ -4246,6 +4405,7 @@
       } else {
         // 未達門檻，用動畫彈回原位
         if (w) w.style.transform = `translateX(${baseX()}%)`;
+        settlePanels(380);
       }
     };
 
@@ -4257,6 +4417,7 @@
         w.classList.remove('notransition');
         w.style.transform = `translateX(${baseX()}%)`;
       }
+      settlePanels(380);
     }, { passive: true });
   }
 
