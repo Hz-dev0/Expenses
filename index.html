@@ -1681,6 +1681,13 @@
         <div style="font-size:11px;color:var(--muted);margin-top:2px">從 JSON 檔案還原所有資料</div>
       </div>
     </button>
+    <button onclick="clearAllRecords()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(220,80,80,0.07);border:1px solid rgba(220,80,80,0.35);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
+      <span style="font-size:22px">🧹</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--danger)">清空記帳明細</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">刪除所有記錄（雲端同步），分類與預算設定保留</div>
+      </div>
+    </button>
     <button onclick="exportCSV()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:16px;cursor:pointer;text-align:left">
       <span style="font-size:22px">📊</span>
       <div>
@@ -4390,9 +4397,12 @@
             const cloud   = merged.get(r.id);
             const backupTs = r.updatedAt || 0;
             const cloudTs  = cloud.updatedAt || 0;
-            if (backupTs > cloudTs) {
-              merged.set(r.id, r);
-              newRecs.push(r); // 備份比較新，也要上傳更新雲端
+            // 雲端那筆是「已刪除」而備份裡還在 → 視為使用者要還原（例如清空後想救回），以備份為準
+            const revive = cloud.deleted && !r.deleted;
+            if (revive || backupTs > cloudTs) {
+              const rr = revive ? { ...r, updatedAt: Date.now() } : r;
+              merged.set(r.id, rr);
+              newRecs.push(rr); // 也要上傳更新雲端（讓其他裝置一起還原）
             }
           }
         });
@@ -4471,6 +4481,30 @@
       console.error('[forceLoad] error', e);
       toast('❌ 讀取失敗：' + e.message);
     }
+  }
+
+  /* ── 清空記帳明細（保留分類與預算設定） ── */
+  async function clearAllRecords() {
+    const active = recs.filter(r => !r.deleted);
+    if (active.length === 0) { toast('目前沒有記帳明細'); return; }
+    if (window._fbUser && !navigator.onLine) {
+      alert('目前離線，請連上網路後再清空，才能同步到雲端和其他裝置。');
+      return;
+    }
+    const ans = prompt(`即將清空全部 ${active.length} 筆記帳明細。\n分類、順序與預算設定會保留。\n會先自動下載一份備份。\n\n確定請輸入「清空」：`);
+    if (ans === null) return;
+    if (ans.trim() !== '清空') { toast('已取消，沒有清空'); return; }
+
+    backupJSON();                                  // 先備份（此時還沒標記刪除）
+    await new Promise(res => setTimeout(res, 700)); // 讓下載先啟動
+
+    const now = Date.now();
+    active.forEach(r => { r.deleted = true; r.deletedAt = now; r.updatedAt = now; });
+    save();
+    render();
+    toast('正在同步到雲端…');
+    await Promise.all(active.map(r => fbSyncRec(r)));
+    toast('✅ 已清空 ' + active.length + ' 筆記帳明細');
   }
 
   function openBackupMenu() {
