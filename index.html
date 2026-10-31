@@ -627,6 +627,8 @@
     #panelWrap.settled > .swipe-panel:not(.is-active) {
       height: 0; overflow: hidden; visibility: hidden; padding-top: 0; padding-bottom: 0;
     }
+    /* 滑動／切換期間，被滑進來的分頁只需要畫一個螢幕高度，避免一開始滑就要畫整份長清單而卡一下 */
+    .swipe-panel.peek:not(.is-active) { max-height: 100vh; max-height: 100dvh; overflow: hidden; }
     .swipe-panel {
       width: 33.333%;
       flex-shrink: 0;
@@ -3973,11 +3975,19 @@
   function unsettlePanels() {
     clearTimeout(_settleTimer);
     const w = document.getElementById('panelWrap');
-    if (w) w.classList.remove('settled');
+    if (w) {
+      w.classList.remove('settled');
+      w.querySelectorAll('.swipe-panel:not(.is-active)').forEach(p => p.classList.add('peek'));
+    }
   }
   function settlePanels(ms) {
     clearTimeout(_settleTimer);
-    const apply = () => { const w = document.getElementById('panelWrap'); if (w) w.classList.add('settled'); };
+    const apply = () => {
+      const w = document.getElementById('panelWrap');
+      if (!w) return;
+      w.classList.add('settled');
+      w.querySelectorAll('.peek').forEach(p => p.classList.remove('peek'));
+    };
     if (ms > 0) _settleTimer = setTimeout(apply, ms); else apply();
   }
   function markActivePanel(t) {
