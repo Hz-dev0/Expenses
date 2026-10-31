@@ -4954,6 +4954,122 @@
     });
   }
 
+
+  /* ── 效能量測（只有網址加 ?perf=1 才啟用，?perf=0 關閉；沒開啟時什麼都不做） ──
+     滑一次畫面後，會在畫面上方列出：手指滑動中／放開後 各有哪些卡頓、卡多久、是哪段程式造成的 */
+  (function perfProbe() {
+    try {
+      const q = new URLSearchParams(location.search).get('perf');
+      if (q === '1') localStorage.setItem('kk_perf', '1');
+      if (q === '0') localStorage.removeItem('kk_perf');
+      if (localStorage.getItem('kk_perf') !== '1') return;
+    } catch (e) { return; }
+
+    const box = document.createElement('div');
+    box.id = 'perfBox';
+    box.style.cssText = 'position:fixed;left:4px;right:4px;top:4px;z-index:100000;max-height:55vh;overflow:hidden;' +
+      'pointer-events:none;background:rgba(0,0,0,.84);color:#9f9;font:10px/1.4 monospace;padding:6px 8px;' +
+      'border-radius:8px;white-space:pre-wrap;word-break:break-all;';
+    box.textContent = '效能量測已開啟：請左右滑一次切換分頁，結果會顯示在這裡（時間單位 ms，@ 後面是從手指碰到螢幕起算）';
+    document.body.appendChild(box);
+
+    let g = null, n = 0, raf = 0, lastF = 0;
+    const buf = [];       // longtask / long-animation-frame 紀錄
+    const reports = [];
+
+    try {
+      new PerformanceObserver(l => { for (const en of l.getEntries()) buf.push({ k: 'longtask', s: en.startTime, d: en.duration }); })
+        .observe({ entryTypes: ['longtask'] });
+    } catch (e) {}
+    try {
+      new PerformanceObserver(l => {
+        for (const en of l.getEntries()) {
+          const sc = (en.scripts || []).map(x =>
+            (x.invoker || x.sourceFunctionName || '?') + ' ' + Math.round(x.duration) + 'ms' +
+            (x.forcedStyleAndLayoutDuration ? '(強制排版' + Math.round(x.forcedStyleAndLayoutDuration) + ')' : '')
+          ).join('; ');
+          buf.push({
+            k: 'LoAF', s: en.startTime, d: en.duration,
+            script: en.renderStart ? Math.round(en.renderStart - en.startTime) : null,                   // 程式執行到開始渲染
+            render: en.renderStart ? Math.round(en.startTime + en.duration - en.renderStart) : null,    // 渲染（排版+繪製）
+            sc
+          });
+        }
+      }).observe({ type: 'long-animation-frame', buffered: false });
+    } catch (e) {}
+
+    const mark = (name, start, dur) => { if (g && !g.done) g.marks.push({ name, at: start - g.t0, dur }); };
+    try {
+      const _goTab = goTab;
+      goTab = function (t) { const st = performance.now(); try { return _goTab.apply(this, arguments); } finally { mark('goTab(' + t + ')', st, performance.now() - st); } };
+      const _render = render;
+      render = function () { const st = performance.now(); try { return _render.apply(this, arguments); } finally { mark('render', st, performance.now() - st); } };
+    } catch (e) {}
+
+    const loop = t => {
+      if (!g || g.done) { raf = 0; return; }
+      if (lastF && t - lastF > 34) g.frames.push({ at: t - g.t0, d: t - lastF });
+      lastF = t;
+      raf = requestAnimationFrame(loop);
+    };
+
+    document.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return;
+      if (e.target.closest && e.target.closest('#kb')) return;
+      if (g && !g.done) finish();
+      g = { t0: performance.now(), tab0: ctab, moves: 0, last: null, maxGap: 0, maxGapAt: 0, maxQ: 0,
+            release: null, frames: [], marks: [], done: false };
+      lastF = 0;
+      if (!raf) raf = requestAnimationFrame(loop);
+    }, true);
+
+    document.addEventListener('touchmove', e => {
+      if (!g || g.done) return;
+      const now = performance.now();
+      if (g.last != null && now - g.last > g.maxGap) { g.maxGap = now - g.last; g.maxGapAt = now - g.t0; }
+      g.last = now; g.moves++;
+      const q = now - e.timeStamp;                      // 事件從發生到被處理，在佇列裡等了多久
+      if (q > 0 && q < 5000 && q > g.maxQ) g.maxQ = q;
+    }, true);
+
+    const end = () => {
+      if (!g || g.done || g.release != null) return;
+      g.release = performance.now();
+      const mine = g;
+      setTimeout(() => { if (g === mine) finish(); }, 1000);
+    };
+    document.addEventListener('touchend', end, true);
+    document.addEventListener('touchcancel', end, true);
+
+    function finish() {
+      if (!g || g.done) return;
+      const e = g; e.done = true;
+      const rel = e.release != null ? e.release - e.t0 : performance.now() - e.t0;
+      const ph = at => (e.release != null && at > rel) ? '放開後' : '滑動中';
+      const R = Math.round;
+      const L = [];
+      L.push('#' + (++n) + '  分頁 ' + e.tab0 + ' → ' + ctab + '｜手指 ' + R(rel) + 'ms｜DOM ' + document.getElementsByTagName('*').length + ' 個');
+      L.push('touchmove ' + e.moves + ' 次｜最大間隔 ' + R(e.maxGap) + 'ms @' + R(e.maxGapAt) + '｜事件最長等待 ' + R(e.maxQ) + 'ms');
+      const fr = e.frames.slice().sort((a, b) => b.d - a.d);
+      L.push('掉幀(>34ms) ' + e.frames.length + ' 次' + (fr.length ? '，最長 ' + R(fr[0].d) + 'ms' : ''));
+      fr.slice(0, 4).forEach(f => L.push('  ・' + R(f.d) + 'ms @' + R(f.at) + ' (' + ph(f.at) + ')'));
+      const ms = e.marks.filter(m => m.dur >= 4);
+      ms.forEach(m => L.push('函式 ' + m.name + ' @' + R(m.at) + ' 花 ' + R(m.dur) + 'ms (' + ph(m.at) + ')'));
+      const hi = buf.filter(b => b.s >= e.t0 - 30 && b.s <= e.t0 + rel + 1200);
+      hi.filter(b => b.k === 'LoAF').slice(0, 4).forEach(b => {
+        const at = b.s - e.t0;
+        L.push('LoAF @' + R(at) + ' 共 ' + R(b.d) + 'ms (' + ph(at) + ')' +
+          (b.script != null ? '｜程式 ' + b.script + 'ms＋渲染 ' + b.render + 'ms' : '') + (b.sc ? '｜' + b.sc : ''));
+      });
+      hi.filter(b => b.k === 'longtask').slice(0, 4).forEach(b => {
+        const at = b.s - e.t0; L.push('longtask @' + R(at) + ' ' + R(b.d) + 'ms (' + ph(at) + ')');
+      });
+      reports.unshift(L.join('\n'));
+      if (reports.length > 3) reports.pop();
+      box.textContent = reports.join('\n──────\n');
+    }
+  })();
+
   init();
 </script>
 </body>
