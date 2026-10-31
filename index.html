@@ -818,6 +818,13 @@
       white-space: nowrap;
       z-index: 200;
     }
+    #toast.has-undo { pointer-events: auto; display: flex; align-items: center; }
+    .toast-undo {
+      margin-left: 12px; padding: 3px 12px; border: none; border-radius: 50px;
+      background: rgba(255,255,255,.28); color: #fff; font-size: 12px; font-weight: 800;
+      font-family: inherit; cursor: pointer;
+    }
+    .toast-undo:active { background: rgba(255,255,255,.45); }
     /* ── Budget Modal ── */
 
     /* ── Budget Modal ── */
@@ -1651,7 +1658,8 @@
 <!-- BACKUP MENU -->
 <div id="backupMenuOverlay" style="display:none;position:fixed;inset:0;background:rgba(74,58,58,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:400;align-items:flex-end;justify-content:center">
   <div style="background:var(--card);border-radius:22px 22px 0 0;padding:20px 16px max(env(safe-area-inset-bottom,0px),20px);width:100%;max-width:480px;box-shadow:0 -4px 32px rgba(200,140,140,0.22);animation:slideUp .2s ease">
-    <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:16px">備份 & 還原</div>
+    <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;text-align:center;margin-bottom:6px">備份 & 還原</div>
+    <div id="syncStatus" style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px"></div>
     <button onclick="forceLoadFromCloud()" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(240,216,216,0.12);border:1px solid var(--bdr);border-radius:14px;margin-bottom:8px;cursor:pointer;text-align:left">
       <span style="font-size:22px">☁️</span>
       <div>
@@ -2482,7 +2490,7 @@
       <div class="bdgp-sum-div"></div>
       <div class="bdgp-sum-col">
         <div class="bdgp-sum-label">剩餘</div>
-        <div class="bdgp-sum-val${totalBase>0&&rem<0?' over':''}">${totalBase > 0 ? '$' + Math.max(0,rem).toLocaleString() : '—'}</div>
+        <div class="bdgp-sum-val${totalBase>0&&rem<0?' over':''}">${totalBase > 0 ? fmtMoney(rem) : '—'}</div>
       </div>
     </div>`;
 
@@ -2736,6 +2744,24 @@
         clearPressTimer();
         if (_subDrag) endSubDrag(true);
       }, { passive: true });
+
+      // 桌機滑鼠：按住拖動排序
+      dot.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const item = itemEl(); if (!item) return;
+        const y0 = e.clientY;
+        clearPressTimer();
+        pressTimer = setTimeout(() => { pressTimer = null; longPressFired = true; startSubDrag(item, y0); }, DOT_LONGPRESS_MS);
+        const mv = ev => { if (_subDrag) moveSubDrag(ev.clientY); };
+        const up = () => {
+          clearPressTimer();
+          document.removeEventListener('mousemove', mv);
+          document.removeEventListener('mouseup', up);
+          if (_subDrag) endSubDrag();
+        };
+        document.addEventListener('mousemove', mv);
+        document.addEventListener('mouseup', up);
+      });
 
       // 桌面滑鼠雙擊（方便電腦上測試/使用）
       dot.addEventListener('dblclick', e => {
@@ -3593,7 +3619,7 @@
     save();
     fbSyncRec(r);
     render();
-    toast(r.exempt ? '已從預算中排除' : '已計入預算');
+    toast(r.exempt ? '已從預算中排除' : '已計入預算', () => toggleExempt(id));
   }
 
   /* ── 支出上限 Modal ── */
@@ -3709,6 +3735,14 @@
     save();
     fbSyncRec(r);
     render();
+    toast('已刪除', () => {
+      r.deleted = false;
+      delete r.deletedAt;
+      r.updatedAt = Date.now();
+      save();
+      fbSyncRec(r);
+      render();
+    });
   }
 
   /* ── 切換月份 ── */
@@ -4116,12 +4150,25 @@
 
   /* ── Toast ── */
   let _toastTimer = null;
-  function toast(msg) {
+  function toast(msg, undo) {
     const el = document.getElementById('toast');
     el.textContent = msg;
+    el.classList.toggle('has-undo', !!undo);
+    if (undo) {
+      const b = document.createElement('button');
+      b.className = 'toast-undo';
+      b.textContent = '復原';
+      b.onclick = ev => {
+        ev.stopPropagation();
+        clearTimeout(_toastTimer);
+        el.classList.remove('show');
+        undo();
+      };
+      el.appendChild(b);
+    }
     el.classList.add('show');
     clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+    _toastTimer = setTimeout(() => el.classList.remove('show'), undo ? 4500 : 2000);
   }
 
   /* ── 匯出 CSV ── */
@@ -4190,6 +4237,22 @@
     return window._fb.collection(window._fb.db, 'users', window._fbUser.uid, 'recs');
   }
 
+  /* ── 同步狀態（顯示在「備份 & 還原」選單） ── */
+  let _syncFailAt = 0;
+  const SK_LASTSYNC = 'kakeibo_last_sync';
+  function markSyncOk()   { _syncFailAt = 0; try { localStorage.setItem(SK_LASTSYNC, String(Date.now())); } catch(e) {} }
+  function markSyncFail() { _syncFailAt = Date.now(); }
+  function syncStatusText() {
+    let last = 0;
+    try { last = parseInt(localStorage.getItem(SK_LASTSYNC), 10) || 0; } catch(e) {}
+    if (!navigator.onLine) return '📴 目前離線，改動已存在本機，連線後會自動補同步';
+    if (_syncFailAt && _syncFailAt >= last) return '⚠️ 最近一次同步失敗，請確認網路後再試一次';
+    if (!last) return '☁️ 尚未同步過（新增或修改記帳後會自動同步）';
+    const min = Math.floor((Date.now() - last) / 60000);
+    const ago = min < 1 ? '剛剛' : min < 60 ? min + ' 分鐘前' : min < 1440 ? Math.floor(min / 60) + ' 小時前' : Math.floor(min / 1440) + ' 天前';
+    return '☁️ 上次同步成功：' + ago;
+  }
+
   async function fbSyncRec(rec) {
     try {
       if (!navigator.onLine) return;   // 離線：本機已存，下次連線時會自動補同步
@@ -4197,7 +4260,9 @@
       if (!col) return;
       const { doc, setDoc } = window._fb;
       await setDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'recs', String(rec.id)), rec);
+      markSyncOk();
     } catch(e) {
+      markSyncFail();
       console.error('[FB] syncRec failed', e);
     }
   }
@@ -4222,8 +4287,10 @@
       if (!window._fb || !window._fbUser) return false;
       const { doc, setDoc } = window._fb;
       await setDoc(doc(window._fb.db, 'users', window._fbUser.uid, 'meta', key), { value });
+      markSyncOk();
       return true;
     } catch(e) {
+      markSyncFail();
       console.error('[FB] syncMeta failed', e);
       return false;
     }
@@ -4408,6 +4475,8 @@
 
   function openBackupMenu() {
     const el = document.getElementById('backupMenuOverlay');
+    const st = document.getElementById('syncStatus');
+    if (st) st.textContent = syncStatusText();
     el.style.display = 'flex';
   }
   function closeBackupMenu() {
