@@ -206,6 +206,7 @@
       background-attachment: fixed;
       color: var(--text);
       min-height: 100vh;
+      min-height: 100dvh;   /* 手機網址列會讓 100vh 比可視高度大，導致空白頁也能捲動 */
       overflow-x: hidden;
       -webkit-user-select: none;
       user-select: none;
@@ -363,7 +364,13 @@
     .tb.on { background: var(--rose); color: #fff; box-shadow: 0 2px 8px var(--shd); }
 
     /* ── SCROLL ── */
-    #scrollArea { padding: 0; }
+    #scrollArea {
+      padding: 0;
+      /* 撐滿標題列與記帳區之間（扣掉 body 的 padding-bottom，多扣 2px 避免小數誤差造成多出一截） */
+      min-height: calc(100vh - var(--topbar-h, 120px) - var(--kb-vis) - 10px);
+      min-height: calc(100dvh - var(--topbar-h, 120px) - var(--kb-vis) - 10px);
+      touch-action: pan-y;   /* 橫向手勢交給 JS（切換分頁），避免瀏覽器把斜向滑動當成捲動而中斷 */
+    }
 
     /* ── LIST ── */
     .dg-head {
@@ -4846,7 +4853,11 @@
     const bar = document.getElementById('topBar');
     const sp  = document.getElementById('topBarSpacer');
     if (!bar || !sp) return;
-    const sync = () => { sp.style.height = bar.offsetHeight + 'px'; };
+    const sync = () => {
+      const h = bar.offsetHeight;
+      sp.style.height = h + 'px';
+      document.documentElement.style.setProperty('--topbar-h', h + 'px');
+    };
     sync();
     if (window.ResizeObserver) new ResizeObserver(sync).observe(bar);
     window.addEventListener('resize', sync);
