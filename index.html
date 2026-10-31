@@ -724,6 +724,34 @@
     .cbt.cbt-unsplit { border-style: dashed; background: rgba(168,136,136,0.08); }
     .cbt.cbt-unsplit.on { border-style: solid; background: var(--accent); border-color: var(--accent); }
 
+    .cbt { -webkit-user-select: none; user-select: none; }
+    .cbt.has-sub::after {
+      content: ''; position: absolute; top: 4px; right: 4px;
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent); border: 1.5px solid #fff;
+    }
+    /* 長按分類 → 子分類彈出面板 */
+    .sub-pop {
+      position: fixed; z-index: 9999;
+      background: var(--card); border: 1.5px solid var(--bdr);
+      border-radius: 14px; padding: 6px;
+      box-shadow: 0 8px 28px rgba(120,80,80,0.28);
+      min-width: 120px; max-width: calc(100vw - 80px);
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      touch-action: none;
+      animation: subPopIn .12s ease-out;
+    }
+    @keyframes subPopIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+    .sub-pop-head { font-size: 12px; font-weight: 700; color: var(--muted); padding: 2px 8px 6px; }
+    .sub-pop-list { display: grid; grid-template-columns: repeat(var(--cols, 1), minmax(96px, 1fr)); gap: 4px; }
+    .sub-pop-item {
+      padding: 12px 14px; border-radius: 10px; font-size: 15px; font-weight: 600;
+      color: var(--text); background: rgba(235,185,185,0.10);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sub-pop-item.cur   { border: 1.5px solid var(--rose); }
+    .sub-pop-item.hover { background: var(--rose); color: #fff; transform: scale(1.04); }
+
 
 
     /* ── 重新命名 Modal ── */
@@ -2009,7 +2037,7 @@
     col.innerHTML = CKEYS.map(k => {
       const c = CATS[k];
       const isOn = k === cat;
-      return `<button class="cbt${isOn ? ' on' : ''}" data-c="${k}" id="cbt-${k}">${c.icon}</button>`;
+      return `<button class="cbt${isOn ? ' on' : ''}${isOn && catSub !== null ? ' has-sub' : ''}" data-c="${k}" id="cbt-${k}">${c.icon}</button>`;
     }).join('') + `<button class="kb-catcol-addbtn" id="kbCatAddBtn" title="新增分類">＋</button>`;
     const addBtn = document.getElementById('kbCatAddBtn');
     if (addBtn) addBtn.onclick = () => { addNewCategory(); };
@@ -2061,7 +2089,7 @@
     CATS_LIST = CATS_LIST.filter(x => x.key !== key);
     delete bdgPlan[key];
     rebuildCats();
-    if (cat === key) cat = CKEYS[0]; // 若刪除的正是目前選取的分類，重置為第一個分類
+    if (cat === key) { cat = CKEYS[0]; catSub = null; } // 若刪除的正是目前選取的分類，重置為第一個分類
     saveCats();
     saveBdgPlan();
     renderCatBtns();
@@ -2163,7 +2191,29 @@
     });
   }
 
-  /* ── 長按偵測（touchstart / mousedown） ── */
+  /* ── 長按分類 → 彈出子分類，按住直接滑到子分類放開即選取 ── */
+  let catSub = null; // 目前選取的子分類 id（null = 不指定）
+
+  // 同步分類按鈕狀態（選取框 + 已選子分類的小圓點）
+  function syncCatBtns() {
+    document.querySelectorAll('.cbt').forEach(b => {
+      const on = b.dataset.c === cat;
+      b.classList.toggle('on', on);
+      b.classList.toggle('has-sub', on && catSub !== null);
+    });
+  }
+
+  // 子分類選取（由長按滑動放開觸發）：直接選定「分類 + 子分類」
+  function pickCatSub(catKey, subId) {
+    cat = catKey;
+    catSub = subId;
+    try { localStorage.setItem(SK_CAT, cat); } catch(e) {}
+    syncCatBtns();
+    const plan = bdgPlan[catKey];
+    const sub  = plan && plan.subs.find(x => x.id === subId);
+    toast(CATS[catKey].icon + ' ' + CATS[catKey].lbl + (sub ? ' › ' + subName(sub, curYM()) : ''));
+  }
+
   function setupLongPress() {
     const grid = document.getElementById('kbGrid');
     let pressTimer     = null;
@@ -2172,35 +2222,106 @@
     let usingTouch     = false; // 偵測到 touch 事件後，忽略後續合成的 mouse 事件，避免重複觸發
     let startX = 0, startY = 0;
     const MOVE_THRESHOLD = 10; // px
+    const LONG_MS = 350;
+
+    // ── 子分類彈出面板 ──
+    let pop = null;        // 面板 DOM
+    let popCat = null;     // 面板所屬分類 key
+    let hoverEl = null;    // 目前手指所在的子分類項目
+
+    const closePop = () => {
+      if (pop) pop.remove();
+      pop = null; popCat = null; hoverEl = null;
+      const col = document.getElementById('kbCatCol');
+      if (col) col.style.overflowY = '';
+    };
+
+    const openPop = (btn) => {
+      const key  = btn.dataset.c;
+      const plan = bdgPlan[key];
+      const subs = (plan && plan.subs) || [];
+      if (!subs.length) {
+        toast('「' + CATS[key].lbl + '」還沒有子分類，可到預算頁新增');
+        return false;
+      }
+      const ym = curYM();
+      pop = document.createElement('div');
+      pop.className = 'sub-pop';
+      pop.style.setProperty('--cols', subs.length > 6 ? 2 : 1);
+      pop.innerHTML =
+        `<div class="sub-pop-head">${CATS[key].icon} ${esc(CATS[key].lbl)}</div>` +
+        `<div class="sub-pop-list">` +
+        subs.map(x => `<div class="sub-pop-item${(cat === key && catSub === x.id) ? ' cur' : ''}" data-sid="${x.id}">${esc(subName(x, ym))}</div>`).join('') +
+        `</div>`;
+      document.body.appendChild(pop);
+      popCat = key;
+
+      // 定位：貼在分類按鈕左側，垂直置中於按鈕，並限制在畫面內
+      const r  = btn.getBoundingClientRect();
+      const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let left = r.left - pw - 8;
+      if (left < 8) left = 8;
+      let top = r.top + r.height / 2 - ph / 2;
+      top = Math.max(8, Math.min(top, window.innerHeight - ph - 8));
+      pop.style.left = left + 'px';
+      pop.style.top  = top + 'px';
+
+      // 滑動期間鎖住分類欄捲動
+      const col = document.getElementById('kbCatCol');
+      if (col) col.style.overflowY = 'hidden';
+      return true;
+    };
+
+    const updateHover = (x, y) => {
+      if (!pop) return;
+      const el = document.elementFromPoint(x, y);
+      const item = el && el.closest ? el.closest('.sub-pop-item') : null;
+      const next = (item && pop.contains(item)) ? item : null;
+      if (next === hoverEl) return;
+      if (hoverEl) hoverEl.classList.remove('hover');
+      hoverEl = next;
+      if (hoverEl) {
+        hoverEl.classList.add('hover');
+        try { navigator.vibrate && navigator.vibrate(8); } catch(e) {}
+      }
+    };
 
     const clearPressTimer = () => {
       clearTimeout(pressTimer);
       pressTimer = null;
     };
 
-    const endPress = () => {
+    // 手指放開 / 滑鼠放開：若停在某子分類上 → 選取；否則取消
+    const endPress = (commit) => {
       if (pressedBtn) pressedBtn.classList.remove('pressed');
       pressedBtn = null;
       clearPressTimer();
+      if (pop) {
+        if (commit) pickCatSub(popCat, hoverEl ? parseInt(hoverEl.dataset.sid, 10) : null); // 停在子分類上 → 選子分類；面板外 → 只選大分類
+        closePop();
+      }
     };
 
-    // 長按 → 開啟「編輯分類」視窗（改名 / 換圖示 / 刪除 都在裡面）
     const startPress = (btn) => {
       longPressFired = false;
       pressedBtn = btn;
       btn.classList.add('pressed');
       clearPressTimer();
       pressTimer = setTimeout(() => {
-        longPressFired = true;
+        pressTimer = null;
+        longPressFired = true;       // 不論有沒有子分類，長按結束後都不要當成「點擊選取」
         if (pressedBtn) pressedBtn.classList.remove('pressed');
-        openRename(btn.dataset.c);
-      }, 480);
+        try { navigator.vibrate && navigator.vibrate(15); } catch(e) {}
+        openPop(btn);
+      }, LONG_MS);
     };
 
+    // 長按觸發前移動太多 → 視為捲動，取消長按
     const movePress = (clientX, clientY) => {
+      if (pop) { updateHover(clientX, clientY); return; }
       if (!pressTimer) return;
       if (Math.abs(clientX - startX) > MOVE_THRESHOLD || Math.abs(clientY - startY) > MOVE_THRESHOLD) {
-        endPress();
+        endPress(false);
       }
     };
 
@@ -2215,16 +2336,15 @@
       startPress(btn);
     }, { passive: true });
 
+    // 非 passive：面板開啟後要擋掉捲動，手指才能順利滑到子分類
     grid.addEventListener('touchmove', e => {
       const t = e.touches[0];
+      if (pop && e.cancelable) e.preventDefault();
       movePress(t.clientX, t.clientY);
-    }, { passive: true });
+    }, { passive: false });
 
-    grid.addEventListener('touchend', endPress, { passive: true });
-    grid.addEventListener('touchcancel', endPress, { passive: true });
-    // 觸控結束後短暫標記，防止合成 mouse 事件重複觸發；500ms 後重置，讓滑鼠可繼續使用
-    grid.addEventListener('touchend',    () => { setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
-    grid.addEventListener('touchcancel', () => { setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
+    grid.addEventListener('touchend',    () => { endPress(true);  setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
+    grid.addEventListener('touchcancel', () => { endPress(false); setTimeout(() => { usingTouch = false; }, 500); }, { passive: true });
 
     // Mouse（桌機；若裝置剛觸發過 touch，忽略合成滑鼠事件避免重複）
     grid.addEventListener('mousedown', e => {
@@ -2235,20 +2355,20 @@
       startY = e.clientY;
       startPress(btn);
     });
-
-    grid.addEventListener('mousemove', e => {
+    document.addEventListener('mousemove', e => {
       if (usingTouch) return;
-      movePress(e.clientX, e.clientY);
+      if (pop || pressTimer) movePress(e.clientX, e.clientY);
     });
+    document.addEventListener('mouseup', () => { if (!usingTouch && (pop || pressedBtn)) endPress(true); });
 
-    grid.addEventListener('mouseup', () => { if (!usingTouch) endPress(); });
-    grid.addEventListener('mouseleave', () => { if (!usingTouch) endPress(); });
+    // 長按時不要跳出系統右鍵 / 長按選單
+    grid.addEventListener('contextmenu', e => { if (e.target.closest('.cbt')) e.preventDefault(); });
 
-    // 點擊 → 選取分類。用原生 click 事件，瀏覽器保證會正確區分「點擊」與「捲動／長按」，不需要自己判斷。
+    // 點擊 → 選取分類（原生 click 會正確區分點擊與捲動）
     grid.addEventListener('click', e => {
       const btn = e.target.closest('.cbt');
       if (!btn) return;
-      if (longPressFired) { longPressFired = false; return; } // 這次點擊是長按結束觸發的，不當作選取
+      if (longPressFired) { longPressFired = false; return; } // 長按結束觸發的 click，不當作選取
       sc(btn.dataset.c);
     });
 
@@ -3585,10 +3705,11 @@
   /* ── 選分類 ── */
   function sc(id) {
     cat = (cat === id) ? UNSPLIT_KEY : id; // 再點一次目前選取的分類 = 取消分類，改列為待拆帳
+    catSub = null;                         // 手動點分類 = 不指定子分類
     if (cat !== UNSPLIT_KEY) {
       try { localStorage.setItem(SK_CAT, cat); } catch(e) {}
     }
-    document.querySelectorAll('.cbt').forEach(b => b.classList.toggle('on', b.dataset.c === cat));
+    syncCatBtns();
   }
 
   /* ── 新增記帳 ── */
@@ -3601,6 +3722,14 @@
 
     const note = document.getElementById('noteInp').value.trim();
     const newRec = { id: _nextId++, date: dv, cat, amt, note, updatedAt: Date.now() };
+    // 若有用長按選子分類 → 寫入 bdgRef，預算頁會直接算進該子分類
+    let subLabel = '';
+    if (catSub !== null && cat !== UNSPLIT_KEY && bdgPlan[cat]) {
+      const sb = bdgPlan[cat].subs.find(x => x.id === catSub);
+      if (sb) { newRec.bdgRef = { catKey: cat, subId: sb.id }; subLabel = ' › ' + subName(sb, dv.slice(0, 7)); }
+    }
+    catSub = null; // 記完就清掉，避免下一筆誤歸到同一個子分類
+    syncCatBtns();
     recs.unshift(newRec);
     save();
     fbSyncRec(newRec);
@@ -3613,7 +3742,7 @@
     vy = d.getFullYear();
     vm = d.getMonth();
     render();
-    toast(CATS[cat].icon + ' NT$' + amt.toLocaleString());
+    toast(CATS[cat].icon + subLabel + ' NT$' + amt.toLocaleString());
     setKb(false);   // 記完帳就收起，讓剛記的那筆露出來
   }
 
