@@ -4728,18 +4728,47 @@
   }
 
   /* ── 清空記帳明細（保留分類與預算設定） ── */
+  // 不用 prompt()：PWA／獨立視窗模式下 prompt 常被瀏覽器擋掉，直接回傳 null，看起來就是「點了沒反應」
+  function askClearConfirm(count) {
+    return new Promise(resolve => {
+      const old = document.getElementById('clearConfirmOverlay');
+      if (old) old.remove();
+      const ov = document.createElement('div');
+      ov.id = 'clearConfirmOverlay';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:600;background:rgba(74,58,58,0.55);display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.innerHTML =
+        '<div style="background:var(--card);border-radius:20px;padding:20px 18px;width:100%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.25)">' +
+          '<div style="font-size:15px;font-weight:700;color:var(--danger);margin-bottom:8px">清空記帳明細</div>' +
+          '<div style="font-size:12.5px;color:var(--text);line-height:1.7;margin-bottom:12px">即將清空全部 ' + count + ' 筆記帳明細。<br>分類、順序與預算設定會保留。<br>會先自動下載一份備份。<br>請輸入「清空」確認：</div>' +
+          '<input id="clearConfirmInp" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--bdr);border-radius:12px;background:transparent;color:var(--text);font-size:16px;font-family:inherit;outline:none;-webkit-user-select:auto;user-select:auto">' +
+          '<div style="display:flex;gap:10px;margin-top:14px">' +
+            '<button id="clearConfirmNo" style="flex:1;padding:11px 0;border-radius:50px;border:none;background:rgba(220,170,170,0.18);color:var(--muted);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer">取消</button>' +
+            '<button id="clearConfirmOk" style="flex:1;padding:11px 0;border-radius:50px;border:none;background:var(--danger);color:#fff;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer">清空</button>' +
+          '</div></div>';
+      document.body.appendChild(ov);
+      const inp = ov.querySelector('#clearConfirmInp');
+      const done = v => { ov.remove(); resolve(v); };
+      ov.querySelector('#clearConfirmNo').onclick = () => done(null);
+      ov.querySelector('#clearConfirmOk').onclick = () => done(inp.value);
+      ov.addEventListener('click', e => { if (e.target === ov) done(null); });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') done(inp.value); });
+      setTimeout(() => { try { inp.focus(); } catch(e) {} }, 50);
+    });
+  }
+
   async function clearAllRecords() {
+    closeBackupMenu();
     const active = recs.filter(r => !r.deleted);
     if (active.length === 0) { toast('目前沒有記帳明細'); return; }
     if (window._fbUser && !navigator.onLine) {
       alert('目前離線，請連上網路後再清空，才能同步到雲端和其他裝置。');
       return;
     }
-    const ans = prompt(`即將清空全部 ${active.length} 筆記帳明細。\n分類、順序與預算設定會保留。\n會先自動下載一份備份。\n\n確定請輸入「清空」：`);
+    const ans = await askClearConfirm(active.length);
     if (ans === null) return;
     if (ans.trim() !== '清空') { toast('已取消，沒有清空'); return; }
 
-    backupJSON();                                  // 先備份（此時還沒標記刪除）
+    try { backupJSON(); } catch(e) { console.error('[clear] backup failed', e); }   // 先備份（此時還沒標記刪除）
     await new Promise(res => setTimeout(res, 700)); // 讓下載先啟動
 
     const now = Date.now();
@@ -4804,30 +4833,71 @@
   function setupSwipe() {
     const area = document.getElementById('scrollArea');
     const tabOrder = ['list', 'ana', 'bdgplan'];
-    let sx = 0, sy = 0, tracking = false, dirLocked = false, isHoriz = false;
+    let sx = 0, sy = 0, tracking = false, dirLocked = false, isHoriz = false, touchId = null;
 
     const getWrap = () => document.getElementById('panelWrap');
 
     // 目前 tab 對應的 translateX 基準值
     const baseX = () => -tabOrder.indexOf(ctab) * 33.333;
 
+    // 不管手勢怎麼中斷（多指、被系統搶走、App 切到背景…），一律回到「目前分頁」的正確位置，避免卡在半途
+    const resetSwipe = () => {
+      tracking = false; dirLocked = false; isHoriz = false; touchId = null;
+      const w = getWrap();
+      if (w) {
+        w.classList.remove('notransition');
+        w.style.transform = `translateX(${baseX()}%)`;
+      }
+      settlePanels(380);
+    };
+
+    // 保險：放手後 0.6 秒若位置還不對（transform 殘留、notransition 沒拿掉），強制校正
+    let _guardTimer = null;
+    const armGuard = () => {
+      clearTimeout(_guardTimer);
+      _guardTimer = setTimeout(() => {
+        if (tracking) return;   // 又開始新的滑動就不干擾
+        const w = getWrap();
+        if (!w) return;
+        w.classList.remove('notransition');
+        const want = `translateX(${baseX()}%)`;
+        if (w.style.transform.replace(/\s/g, '') !== want.replace(/\s/g, '')) w.style.transform = want;
+        settlePanels(0);
+      }, 600);
+    };
+
+    const findTouch = (list) => {
+      for (let i = 0; i < list.length; i++) if (list[i].identifier === touchId) return list[i];
+      return null;
+    };
+
     document.addEventListener('touchstart', e => {
-      // 只處理內容區與空白處；標題列、記帳區、彈窗、輸入框、子分類面板都不算
+      // 多指：如果正在拖曳，直接收回，不要讓畫面卡在半途
+      if (e.touches.length !== 1) {
+        if (tracking && isHoriz) resetSwipe(); else tracking = false;
+        return;
+      }
       tracking = false;
-      if (e.touches.length !== 1) return;
+      // 只處理內容區與空白處；標題列、記帳區、彈窗、輸入框、子分類面板都不算
       if (e.target.closest('#topBar, #kb, .sub-pop, [id$="Overlay"], input, textarea, select')) return;
-      sx = e.touches[0].clientX;
-      sy = e.touches[0].clientY;
+      clearTimeout(_guardTimer);
+      const t = e.touches[0];
+      touchId = t.identifier;
+      sx = t.clientX;
+      sy = t.clientY;
       tracking = true;
       dirLocked = false;
       isHoriz   = false;
-      // 先不動 transition，等確認是水平滑才關
+      // 若上一次切換動畫還沒跑完，先讓畫面定在它目前的位置，不要在動畫中途開始拖
+      // （確認是水平滑才關 transition）
     }, { passive: true });
 
     document.addEventListener('touchmove', e => {
       if (!tracking) return;
-      const dx = e.touches[0].clientX - sx;
-      const dy = e.touches[0].clientY - sy;
+      const t = findTouch(e.touches);
+      if (!t) return;
+      const dx = t.clientX - sx;
+      const dy = t.clientY - sy;
 
       if (!dirLocked) {
         if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
@@ -4837,7 +4907,7 @@
           // 確認是水平滑才關掉 transition，讓 panel 直接跟手
           const w = getWrap();
           if (w) w.classList.add('notransition');
-          unsettlePanels();   // 滑動中兩個分頁都要可見
+          unsettlePanels();                // 滑動中兩個分頁都要可見
         }
       }
       if (!isHoriz) return;
@@ -4855,6 +4925,8 @@
 
     const endSwipe = e => {
       if (!tracking) return;
+      const t = findTouch(e.changedTouches);
+      if (!t) return;            // 不是我們追蹤的那根手指放開
       tracking = false;
 
       const w = getWrap();
@@ -4867,32 +4939,32 @@
       // 恢復 transition（先移除 class，讓後續 transform 有動畫）
       if (w) w.classList.remove('notransition');
 
-      const dx = (e.changedTouches[0]?.clientX ?? sx) - sx;
+      const dx = t.clientX - sx;
       const screenW = area.offsetWidth || window.innerWidth;
       const threshold = screenW * 0.2;
       const idx = tabOrder.indexOf(ctab);
 
-      if (dx < -threshold && idx < tabOrder.length - 1) {
-        goTab(tabOrder[idx + 1]);
-      } else if (dx > threshold && idx > 0) {
-        goTab(tabOrder[idx - 1]);
-      } else {
-        // 未達門檻，用動畫彈回原位
-        if (w) w.style.transform = `translateX(${baseX()}%)`;
-        settlePanels(380);
+      try {
+        if (dx < -threshold && idx < tabOrder.length - 1) {
+          goTab(tabOrder[idx + 1]);
+        } else if (dx > threshold && idx > 0) {
+          goTab(tabOrder[idx - 1]);
+        } else {
+          // 未達門檻，用動畫彈回原位
+          if (w) w.style.transform = `translateX(${baseX()}%)`;
+          settlePanels(380);
+        }
+      } catch (err) {
+        console.error('[swipe] goTab failed', err);
+        resetSwipe();
       }
+      armGuard();
     };
 
-    document.addEventListener('touchend',    endSwipe, { passive: true });
-    document.addEventListener('touchcancel', () => {
-      tracking = false;
-      const w = getWrap();
-      if (w) {
-        w.classList.remove('notransition');
-        w.style.transform = `translateX(${baseX()}%)`;
-      }
-      settlePanels(380);
-    }, { passive: true });
+    document.addEventListener('touchend', endSwipe, { passive: true });
+    document.addEventListener('touchcancel', () => { resetSwipe(); armGuard(); }, { passive: true });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') resetSwipe(); });
+    window.addEventListener('blur', () => { if (tracking && isHoriz) resetSwipe(); });
   }
 
 
