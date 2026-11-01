@@ -396,8 +396,9 @@
       margin-bottom: 6px;
       border: 1px solid var(--bdr);
       box-shadow: 0 2px 10px var(--shd);
-      animation: fi .2s ease;
     }
+    /* 只有「剛新增一筆」才淡入；切換分頁／重繪時不要讓整份清單一起播動畫 */
+    #listPanel.fi-on .ri { animation: fi .2s ease; }
     @keyframes fi {
       from { opacity: 0; transform: translateY(-4px); }
       to   { opacity: 1; transform: none; }
@@ -626,9 +627,8 @@
     .swipe-panel:not(.is-active) {
       max-height: calc(100vh - var(--topbar-h, 0px) - var(--kb-vis, 0px));
       max-height: calc(100dvh - var(--topbar-h, 0px) - var(--kb-vis, 0px));
-      overflow: hidden; visibility: hidden;
+      overflow: hidden;   /* 不再切 visibility：相鄰分頁已限制在一個螢幕高度，且被外層 clip 裁掉，成本很低；省掉起手與收尾各一次重繪 */
     }
-    .swipe-panel.vis:not(.is-active) { visibility: visible; }
     .swipe-panel {
       width: 33.333%;
       flex-shrink: 0;
@@ -3815,7 +3815,10 @@
     const d = new Date(dv + 'T00:00:00');
     vy = d.getFullYear();
     vm = d.getMonth();
+    const _lp = document.getElementById('listPanel');
+    _lp.classList.add('fi-on');
     render();
+    setTimeout(() => _lp.classList.remove('fi-on'), 400);
     toast(CATS[cat].icon + subLabel + ' NT$' + amt.toLocaleString());
     setKb(false);   // 記完帳就收起，讓剛記的那筆露出來
   }
@@ -3974,17 +3977,9 @@
 
   /* ── 分頁顯示：非目前分頁平常隱藏，滑動／切換期間才顯示（只改 visibility，不觸發排版） ── */
   let _settleTimer = null, _activeTimer = null;
-  function unsettlePanels() {
-    clearTimeout(_settleTimer);
-    document.querySelectorAll('#panelWrap > .swipe-panel').forEach(p => p.classList.add('vis'));
-  }
-  function settlePanels(ms) {
-    clearTimeout(_settleTimer);
-    const apply = () => {
-      document.querySelectorAll('#panelWrap > .swipe-panel').forEach(p => p.classList.remove('vis'));
-    };
-    if (ms > 0) _settleTimer = setTimeout(apply, ms); else apply();
-  }
+  // 相鄰分頁現在一律可見（CSS 已不再用 visibility 隱藏），這兩個保留為空函式，避免改動所有呼叫處
+  function unsettlePanels() {}
+  function settlePanels() {}
   function markActivePanel(t) {
     const ids = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' };
     Object.keys(ids).forEach(k => {
@@ -3996,38 +3991,38 @@
   /* ── 切換 Tab ── */
   function goTab(t) {
     if (ctab === t) return;
-    // 上一次切換還沒完成「換成 active」就又切了：先把它完成
-    clearTimeout(_activeTimer);
-    markActivePanel(ctab);
+    // 上一次切換的收尾還沒做：先立刻完成（只做輕量的 class 切換）
+    if (_activeTimer) { clearTimeout(_activeTimer); _activeTimer = null; markActivePanel(ctab); }
+    clearTimeout(_tabRenderTimer);
     ctab = t;
-    unsettlePanels();
-    settlePanels(420);
-    // 「換成 active」（解除高度限制，會讓長清單重新排版）延到動畫結束後，才不會在動畫起跑時卡一下
-    _activeTimer = setTimeout(() => { if (ctab === t) markActivePanel(t); }, 330);
     document.getElementById('tabList').classList.toggle('on', t === 'list');
     document.getElementById('tabAna').classList.toggle('on', t === 'ana');
     document.getElementById('tabBdgPlan').classList.toggle('on', t === 'bdgplan');
-    // 先更新 transform（讓動畫立即啟動），動畫結束後才渲染內容（避免阻塞動畫）
+    // 先更新 transform（讓動畫立即啟動）
     const wrap = document.getElementById('panelWrap');
     if (wrap) {
       if (t === 'list')     wrap.style.transform = 'translateX(0)';
       else if (t === 'ana') wrap.style.transform = 'translateX(-33.333%)';
       else                  wrap.style.transform = 'translateX(-66.666%)';
     }
-    //  - 這個分頁從沒畫過（空的）→ 馬上畫，不然滑進來會是空白
-    //  - 已經有內容 → 等動畫結束再更新；內容沒變就不重建 DOM（見 installHTMLGuard）
     const target = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' }[t];
     const tEl = document.getElementById(target);
-    if (!tEl || !tEl.innerHTML) {
-      requestAnimationFrame(() => render());
-    } else {
-      clearTimeout(_tabRenderTimer);
-      _tabRenderTimer = setTimeout(() => {
-        if (ctab !== t) return;
-        _guardHTML = true;
-        try { render(); } finally { _guardHTML = false; }
-      }, 345);
-    }
+    // 這個分頁從沒畫過（空的）→ 馬上畫，不然滑進來會是空白
+    if (!tEl || !tEl.innerHTML) requestAnimationFrame(() => render());
+
+    // 收尾（換成 active＝解除高度限制、重畫內容）合併成「一次」，等動畫完全結束、瀏覽器閒下來才做，
+    // 讓排版與重繪只發生一次，而不是 330 / 345 / 420ms 各來一下
+    const finish = () => {
+      _activeTimer = null;
+      if (ctab !== t) return;
+      markActivePanel(t);
+      _guardHTML = true;
+      try { render(); } finally { _guardHTML = false; }
+    };
+    _activeTimer = setTimeout(() => {
+      if (window.requestIdleCallback) requestIdleCallback(finish, { timeout: 250 });
+      else finish();
+    }, 340);
   }
 
   // 明細／分析面板：切換分頁時若新內容和上次完全相同，就略過 innerHTML 重建（省下大量 DOM 建立與重繪）
@@ -4835,12 +4830,24 @@
 
     const getWrap = () => document.getElementById('panelWrap');
 
+    // 每一幀只寫一次 transform
+    let _pendingX = null, _rafId = 0;
+    const flushMove = () => {
+      _rafId = 0;
+      if (_pendingX === null) return;
+      const w = getWrap();
+      if (w) w.style.transform = `translateX(${_pendingX}%)`;
+      _pendingX = null;
+    };
+    const cancelMove = () => { if (_rafId) cancelAnimationFrame(_rafId); _rafId = 0; _pendingX = null; };
+
     // 目前 tab 對應的 translateX 基準值
     const baseX = () => -tabOrder.indexOf(ctab) * 33.333;
 
     // 不管手勢怎麼中斷（多指、被系統搶走、App 切到背景…），一律回到「目前分頁」的正確位置，避免卡在半途
     const resetSwipe = () => {
       tracking = false; dirLocked = false; isHoriz = false; touchId = null;
+      cancelMove();
       const w = getWrap();
       if (w) {
         w.classList.remove('notransition');
@@ -4917,8 +4924,8 @@
 
       const screenW = area.offsetWidth || window.innerWidth;
       const movePct = (move / screenW) * 33.333;
-      const w = getWrap();
-      if (w) w.style.transform = `translateX(${baseX() + movePct}%)`;
+      _pendingX = baseX() + movePct;
+      if (!_rafId) _rafId = requestAnimationFrame(flushMove);
     }, { passive: true });
 
     const endSwipe = e => {
@@ -4926,6 +4933,7 @@
       const t = findTouch(e.changedTouches);
       if (!t) return;            // 不是我們追蹤的那根手指放開
       tracking = false;
+      cancelMove();
 
       const w = getWrap();
       if (!isHoriz) {
