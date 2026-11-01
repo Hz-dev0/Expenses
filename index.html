@@ -618,8 +618,9 @@
       display: flex;
       align-items: flex-start;   /* 各分頁依自己的內容高度，不被最長的分頁撐高 */
       width: 300%;
-      transition: transform .32s cubic-bezier(.4,0,.2,1);
+      transition: transform .28s cubic-bezier(.22,.8,.3,1);
       will-change: transform;
+      backface-visibility: hidden;
     }
     #panelWrap.notransition { transition: none; }
     /* 非目前分頁：永遠限制在一個螢幕高度並隱藏（只切 visibility，不改高度），
@@ -635,6 +636,7 @@
       min-width: 0;
       padding: 0 14px;
       box-sizing: border-box;
+      contain: layout style;   /* 某個分頁重排時，不連帶重排另外兩個 */
     }
 
     .kb-r2 { display: flex; }
@@ -4022,7 +4024,7 @@
     _activeTimer = setTimeout(() => {
       if (window.requestIdleCallback) requestIdleCallback(finish, { timeout: 250 });
       else finish();
-    }, 340);
+    }, 300);
   }
 
   // 明細／分析面板：切換分頁時若新內容和上次完全相同，就略過 innerHTML 重建（省下大量 DOM 建立與重繪）
@@ -4827,6 +4829,7 @@
     const area = document.getElementById('scrollArea');
     const tabOrder = ['list', 'ana', 'bdgplan'];
     let sx = 0, sy = 0, tracking = false, dirLocked = false, isHoriz = false, touchId = null;
+    let screenW0 = 0, lastX = 0, lastT = 0, vx = 0;   // 寬度只在 touchstart 量一次；vx＝手指速度(px/ms)，用來判斷「甩一下」
 
     const getWrap = () => document.getElementById('panelWrap');
 
@@ -4890,6 +4893,8 @@
       touchId = t.identifier;
       sx = t.clientX;
       sy = t.clientY;
+      screenW0 = area.offsetWidth || window.innerWidth;
+      lastX = sx; lastT = e.timeStamp; vx = 0;
       tracking = true;
       dirLocked = false;
       isHoriz   = false;
@@ -4922,8 +4927,10 @@
       const atRight = idx === tabOrder.length - 1 && dx < 0;
       const move    = (atLeft || atRight) ? dx * 0.25 : dx;
 
-      const screenW = area.offsetWidth || window.innerWidth;
-      const movePct = (move / screenW) * 33.333;
+      const dtm = e.timeStamp - lastT;
+      if (dtm > 0) vx = 0.7 * vx + 0.3 * ((t.clientX - lastX) / dtm);
+      lastX = t.clientX; lastT = e.timeStamp;
+      const movePct = (move / screenW0) * 33.333;   // 不在每次 touchmove 讀 offsetWidth（會強制同步排版）
       _pendingX = baseX() + movePct;
       if (!_rafId) _rafId = requestAnimationFrame(flushMove);
     }, { passive: true });
@@ -4933,7 +4940,7 @@
       const t = findTouch(e.changedTouches);
       if (!t) return;            // 不是我們追蹤的那根手指放開
       tracking = false;
-      cancelMove();
+      flushMove();   // 把最後一幀的位置寫進去，放手後的動畫才會從手指當下的位置接續，不會跳一格
 
       const w = getWrap();
       if (!isHoriz) {
@@ -4946,14 +4953,17 @@
       if (w) w.classList.remove('notransition');
 
       const dx = t.clientX - sx;
-      const screenW = area.offsetWidth || window.innerWidth;
-      const threshold = screenW * 0.2;
+      const threshold = screenW0 * 0.2;
       const idx = tabOrder.indexOf(ctab);
+      // 甩一下（速度夠快、位移不用到 20%）也算翻頁
+      const flick = Math.abs(vx) > 0.45 && Math.abs(dx) > 30;
+      const goNext = dx < -threshold || (flick && vx < 0 && dx < 0);
+      const goPrev = dx > threshold  || (flick && vx > 0 && dx > 0);
 
       try {
-        if (dx < -threshold && idx < tabOrder.length - 1) {
+        if (goNext && idx < tabOrder.length - 1) {
           goTab(tabOrder[idx + 1]);
-        } else if (dx > threshold && idx > 0) {
+        } else if (goPrev && idx > 0) {
           goTab(tabOrder[idx - 1]);
         } else {
           // 未達門檻，用動畫彈回原位
