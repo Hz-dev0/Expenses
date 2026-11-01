@@ -4864,6 +4864,13 @@
       }, 600);
     };
 
+    // 看門狗：拖曳中超過 2.5 秒沒有任何觸控事件，視為 touchend 遺失，自動收回
+    let _idleTimer = null;
+    const kickIdle = () => {
+      clearTimeout(_idleTimer);
+      _idleTimer = setTimeout(() => { if (tracking && isHoriz) { resetSwipe(); armGuard(); } }, 2500);
+    };
+
     const findTouch = (list) => {
       for (let i = 0; i < list.length; i++) if (list[i].identifier === touchId) return list[i];
       return null;
@@ -4871,21 +4878,26 @@
 
     document.addEventListener('touchstart', e => {
       // 多指：如果正在拖曳，直接收回，不要讓畫面卡在半途
-      if (e.touches.length !== 1) {
-        if (tracking && isHoriz) resetSwipe(); else tracking = false;
+      // 但如果目前沒有在追蹤手勢，e.touches 卻多於 1 根，通常是上一根手指的 touchend 被系統吃掉、
+      // 殘留在清單裡（快速連滑時 Android 偶爾會發生）。這時不能整個忽略，否則之後每次觸控都會被擋掉、
+      // 只有螢幕休眠（清空觸控狀態）才會恢復 → 改成以「這次新按下的那根手指」為準繼續處理
+      if (e.touches.length !== 1 && tracking) {
+        if (isHoriz) resetSwipe(); else tracking = false;
         return;
       }
       tracking = false;
       // 只處理內容區與空白處；標題列、記帳區、彈窗、輸入框、子分類面板都不算
       if (e.target.closest('#topBar, #kb, .sub-pop, [id$="Overlay"], input, textarea, select')) return;
       clearTimeout(_guardTimer);
-      const t = e.touches[0];
+      const t = e.changedTouches[0] || e.touches[0];
+      if (!t) return;
       touchId = t.identifier;
       sx = t.clientX;
       sy = t.clientY;
       tracking = true;
       dirLocked = false;
       isHoriz   = false;
+      kickIdle();
       // 若上一次切換動畫還沒跑完，先讓畫面定在它目前的位置，不要在動畫中途開始拖
       // （確認是水平滑才關 transition）
     }, { passive: true });
@@ -4909,6 +4921,7 @@
         }
       }
       if (!isHoriz) return;
+      kickIdle();
 
       const idx    = tabOrder.indexOf(ctab);
       const atLeft  = idx === 0 && dx > 0;
@@ -4926,6 +4939,7 @@
       const t = findTouch(e.changedTouches);
       if (!t) return;            // 不是我們追蹤的那根手指放開
       tracking = false;
+      clearTimeout(_idleTimer);
 
       const w = getWrap();
       if (!isHoriz) {
