@@ -4022,17 +4022,25 @@
       requestAnimationFrame(() => render());
     } else {
       clearTimeout(_tabRenderTimer);
-      _tabRenderTimer = setTimeout(() => {
+      let _tries = 0;
+      const run = () => {
         if (ctab !== t) return;
+        // 手指還按著就先等一下（最多等 1.5 秒），放開後再重畫
+        if (_touching && _tries++ < 15) { _tabRenderTimer = setTimeout(run, 100); return; }
         _guardHTML = true;
         try { render(); } finally { _guardHTML = false; }
-      }, 345);
+      };
+      _tabRenderTimer = setTimeout(run, 345);
     }
   }
 
   // 明細／分析面板：切換分頁時若新內容和上次完全相同，就略過 innerHTML 重建（省下大量 DOM 建立與重繪）
   // 只有切換分頁的那次重畫會略過；一般的資料更新仍然照常重建。預算頁有拖曳排序會直接動 DOM，所以不套用。
   let _guardHTML = false, _tabRenderTimer = null;
+  // 手指正按在螢幕上時為 true。切頁後的延遲重畫會用 innerHTML 換掉整個面板；若使用者剛好又在滑，
+  // 被手指按住的那個元素會被從 DOM 拿掉，之後的 touchmove / touchend 就不會再傳到 document，
+  // 手勢狀態因此卡在半途（這是「快速連滑才卡住、過幾秒才恢復」的原因）
+  let _touching = false;
   function installHTMLGuard(id) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -4876,7 +4884,10 @@
       return null;
     };
 
+    let _startTarget = null, _detachPoll = null;
+    const stopPoll = () => { clearInterval(_detachPoll); _detachPoll = null; };
     document.addEventListener('touchstart', e => {
+      _touching = true;
       // 多指：如果正在拖曳，直接收回，不要讓畫面卡在半途
       // 但如果目前沒有在追蹤手勢，e.touches 卻多於 1 根，通常是上一根手指的 touchend 被系統吃掉、
       // 殘留在清單裡（快速連滑時 Android 偶爾會發生）。這時不能整個忽略，否則之後每次觸控都會被擋掉、
@@ -4892,6 +4903,7 @@
       const t = e.changedTouches[0] || e.touches[0];
       if (!t) return;
       touchId = t.identifier;
+      _startTarget = e.target;
       sx = t.clientX;
       sy = t.clientY;
       tracking = true;
@@ -4918,6 +4930,12 @@
           const w = getWrap();
           if (w) w.classList.add('notransition');
           unsettlePanels();                // 滑動中兩個分頁都要可見
+          // 保險：按住的元素若在拖曳中被換掉（資料更新等），後續觸控事件收不到 → 立刻收回，不用等 2.5 秒
+          stopPoll();
+          _detachPoll = setInterval(() => {
+            if (!tracking) { stopPoll(); return; }
+            if (_startTarget && !_startTarget.isConnected) { stopPoll(); resetSwipe(); armGuard(); }
+          }, 100);
         }
       }
       if (!isHoriz) return;
@@ -4940,6 +4958,7 @@
       if (!t) return;            // 不是我們追蹤的那根手指放開
       tracking = false;
       clearTimeout(_idleTimer);
+      stopPoll();
 
       const w = getWrap();
       if (!isHoriz) {
@@ -4973,8 +4992,9 @@
       armGuard();
     };
 
+    document.addEventListener('touchend', () => { _touching = false; }, { passive: true, capture: true });
     document.addEventListener('touchend', endSwipe, { passive: true });
-    document.addEventListener('touchcancel', () => { resetSwipe(); armGuard(); }, { passive: true });
+    document.addEventListener('touchcancel', () => { _touching = false; stopPoll(); resetSwipe(); armGuard(); }, { passive: true });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') resetSwipe(); });
     window.addEventListener('blur', () => { if (tracking && isHoriz) resetSwipe(); });
   }
