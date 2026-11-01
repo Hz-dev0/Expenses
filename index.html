@@ -4834,13 +4834,30 @@
     const getWrap = () => document.getElementById('panelWrap');
 
     // 每一幀只寫一次 transform
-    let _pendingX = null, _rafId = 0;
+    let _pendingX = null, _rafId = 0, _curX = 0, _snapTimer = null;
     const flushMove = () => {
       _rafId = 0;
       if (_pendingX === null) return;
       const w = getWrap();
       if (w) w.style.transform = `translateX(${_pendingX}%)`;
+      _curX = _pendingX;
       _pendingX = null;
+    };
+    // 放手後的收尾動畫：用「手指放開當下的速度」接續，而不是從靜止重新起跑
+    // （錄影顯示：放手前每幀 ~2.4 的位移 → 放手後瞬間掉到 ~0 再慢慢加速，這個速度斷層就是「不絲滑」的來源）
+    const SNAP_EASE = 'cubic-bezier(.33,1,.68,1)';   // 起步斜率 = 1/.33 ≈ 3（ease-out，沒有 ease-in 的起步遲滯）
+    const snapTo = (targetIdx) => {
+      const w = getWrap();
+      if (!w) return;
+      const targetPct = -targetIdx * 33.333;
+      const remainPx = Math.abs(targetPct - _curX) / 33.333 * screenW0;
+      const toward = Math.sign(targetPct - _curX) || 1;
+      const v = vx * toward;                              // px/ms，朝目標方向的手指速度
+      let dur = 280;
+      if (v > 0.05 && remainPx > 1) dur = Math.max(160, Math.min(320, 3 * remainPx / v));
+      w.style.transition = `transform ${Math.round(dur)}ms ${SNAP_EASE}`;
+      clearTimeout(_snapTimer);
+      _snapTimer = setTimeout(() => { w.style.transition = ''; }, dur + 60);
     };
     const cancelMove = () => { if (_rafId) cancelAnimationFrame(_rafId); _rafId = 0; _pendingX = null; };
 
@@ -4853,6 +4870,7 @@
       cancelMove();
       const w = getWrap();
       if (w) {
+        w.style.transition = '';
         w.classList.remove('notransition');
         w.style.transform = `translateX(${baseX()}%)`;
       }
@@ -4889,6 +4907,7 @@
       // 只處理內容區與空白處；標題列、記帳區、彈窗、輸入框、子分類面板都不算
       if (e.target.closest('#topBar, #kb, .sub-pop, [id$="Overlay"], input, textarea, select')) return;
       clearTimeout(_guardTimer);
+      clearTimeout(_snapTimer); { const _w = getWrap(); if (_w) _w.style.transition = ''; }
       const t = e.touches[0];
       touchId = t.identifier;
       sx = t.clientX;
@@ -4959,6 +4978,9 @@
       const flick = Math.abs(vx) > 0.45 && Math.abs(dx) > 30;
       const goNext = dx < -threshold || (flick && vx < 0 && dx < 0);
       const goPrev = dx > threshold  || (flick && vx > 0 && dx > 0);
+
+      const tIdx = (goNext && idx < tabOrder.length - 1) ? idx + 1 : (goPrev && idx > 0) ? idx - 1 : idx;
+      snapTo(tIdx);
 
       try {
         if (goNext && idx < tabOrder.length - 1) {
