@@ -396,9 +396,8 @@
       margin-bottom: 6px;
       border: 1px solid var(--bdr);
       box-shadow: 0 2px 10px var(--shd);
+      animation: fi .2s ease;
     }
-    /* 只有「剛新增一筆」才淡入；切換分頁／重繪時不要讓整份清單一起播動畫 */
-    #listPanel.fi-on .ri { animation: fi .2s ease; }
     @keyframes fi {
       from { opacity: 0; transform: translateY(-4px); }
       to   { opacity: 1; transform: none; }
@@ -618,9 +617,8 @@
       display: flex;
       align-items: flex-start;   /* 各分頁依自己的內容高度，不被最長的分頁撐高 */
       width: 300%;
-      transition: transform .28s cubic-bezier(.22,.8,.3,1);
+      transition: transform .32s cubic-bezier(.4,0,.2,1);
       will-change: transform;
-      backface-visibility: hidden;
     }
     #panelWrap.notransition { transition: none; }
     /* 非目前分頁：永遠限制在一個螢幕高度並隱藏（只切 visibility，不改高度），
@@ -628,15 +626,15 @@
     .swipe-panel:not(.is-active) {
       max-height: calc(100vh - var(--topbar-h, 0px) - var(--kb-vis, 0px));
       max-height: calc(100dvh - var(--topbar-h, 0px) - var(--kb-vis, 0px));
-      overflow: hidden;   /* 不再切 visibility：相鄰分頁已限制在一個螢幕高度，且被外層 clip 裁掉，成本很低；省掉起手與收尾各一次重繪 */
+      overflow: hidden; visibility: hidden;
     }
+    .swipe-panel.vis:not(.is-active) { visibility: visible; }
     .swipe-panel {
       width: 33.333%;
       flex-shrink: 0;
       min-width: 0;
       padding: 0 14px;
       box-sizing: border-box;
-      contain: layout style;   /* 某個分頁重排時，不連帶重排另外兩個 */
     }
 
     .kb-r2 { display: flex; }
@@ -3817,10 +3815,7 @@
     const d = new Date(dv + 'T00:00:00');
     vy = d.getFullYear();
     vm = d.getMonth();
-    const _lp = document.getElementById('listPanel');
-    _lp.classList.add('fi-on');
     render();
-    setTimeout(() => _lp.classList.remove('fi-on'), 400);
     toast(CATS[cat].icon + subLabel + ' NT$' + amt.toLocaleString());
     setKb(false);   // 記完帳就收起，讓剛記的那筆露出來
   }
@@ -3979,9 +3974,17 @@
 
   /* ── 分頁顯示：非目前分頁平常隱藏，滑動／切換期間才顯示（只改 visibility，不觸發排版） ── */
   let _settleTimer = null, _activeTimer = null;
-  // 相鄰分頁現在一律可見（CSS 已不再用 visibility 隱藏），這兩個保留為空函式，避免改動所有呼叫處
-  function unsettlePanels() {}
-  function settlePanels() {}
+  function unsettlePanels() {
+    clearTimeout(_settleTimer);
+    document.querySelectorAll('#panelWrap > .swipe-panel').forEach(p => p.classList.add('vis'));
+  }
+  function settlePanels(ms) {
+    clearTimeout(_settleTimer);
+    const apply = () => {
+      document.querySelectorAll('#panelWrap > .swipe-panel').forEach(p => p.classList.remove('vis'));
+    };
+    if (ms > 0) _settleTimer = setTimeout(apply, ms); else apply();
+  }
   function markActivePanel(t) {
     const ids = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' };
     Object.keys(ids).forEach(k => {
@@ -3993,38 +3996,38 @@
   /* ── 切換 Tab ── */
   function goTab(t) {
     if (ctab === t) return;
-    // 上一次切換的收尾還沒做：先立刻完成（只做輕量的 class 切換）
-    if (_activeTimer) { clearTimeout(_activeTimer); _activeTimer = null; markActivePanel(ctab); }
-    clearTimeout(_tabRenderTimer);
+    // 上一次切換還沒完成「換成 active」就又切了：先把它完成
+    clearTimeout(_activeTimer);
+    markActivePanel(ctab);
     ctab = t;
+    unsettlePanels();
+    settlePanels(420);
+    // 「換成 active」（解除高度限制，會讓長清單重新排版）延到動畫結束後，才不會在動畫起跑時卡一下
+    _activeTimer = setTimeout(() => { if (ctab === t) markActivePanel(t); }, 330);
     document.getElementById('tabList').classList.toggle('on', t === 'list');
     document.getElementById('tabAna').classList.toggle('on', t === 'ana');
     document.getElementById('tabBdgPlan').classList.toggle('on', t === 'bdgplan');
-    // 先更新 transform（讓動畫立即啟動）
+    // 先更新 transform（讓動畫立即啟動），動畫結束後才渲染內容（避免阻塞動畫）
     const wrap = document.getElementById('panelWrap');
     if (wrap) {
       if (t === 'list')     wrap.style.transform = 'translateX(0)';
       else if (t === 'ana') wrap.style.transform = 'translateX(-33.333%)';
       else                  wrap.style.transform = 'translateX(-66.666%)';
     }
+    //  - 這個分頁從沒畫過（空的）→ 馬上畫，不然滑進來會是空白
+    //  - 已經有內容 → 等動畫結束再更新；內容沒變就不重建 DOM（見 installHTMLGuard）
     const target = { list: 'listPanel', ana: 'anaPanel', bdgplan: 'bdgPlanPanel' }[t];
     const tEl = document.getElementById(target);
-    // 這個分頁從沒畫過（空的）→ 馬上畫，不然滑進來會是空白
-    if (!tEl || !tEl.innerHTML) requestAnimationFrame(() => render());
-
-    // 收尾（換成 active＝解除高度限制、重畫內容）合併成「一次」，等動畫完全結束、瀏覽器閒下來才做，
-    // 讓排版與重繪只發生一次，而不是 330 / 345 / 420ms 各來一下
-    const finish = () => {
-      _activeTimer = null;
-      if (ctab !== t) return;
-      markActivePanel(t);
-      _guardHTML = true;
-      try { render(); } finally { _guardHTML = false; }
-    };
-    _activeTimer = setTimeout(() => {
-      if (window.requestIdleCallback) requestIdleCallback(finish, { timeout: 250 });
-      else finish();
-    }, 300);
+    if (!tEl || !tEl.innerHTML) {
+      requestAnimationFrame(() => render());
+    } else {
+      clearTimeout(_tabRenderTimer);
+      _tabRenderTimer = setTimeout(() => {
+        if (ctab !== t) return;
+        _guardHTML = true;
+        try { render(); } finally { _guardHTML = false; }
+      }, 345);
+    }
   }
 
   // 明細／分析面板：切換分頁時若新內容和上次完全相同，就略過 innerHTML 重建（省下大量 DOM 建立與重繪）
@@ -4829,37 +4832,8 @@
     const area = document.getElementById('scrollArea');
     const tabOrder = ['list', 'ana', 'bdgplan'];
     let sx = 0, sy = 0, tracking = false, dirLocked = false, isHoriz = false, touchId = null;
-    let screenW0 = 0, lastX = 0, lastT = 0, vx = 0;   // 寬度只在 touchstart 量一次；vx＝手指速度(px/ms)，用來判斷「甩一下」
 
     const getWrap = () => document.getElementById('panelWrap');
-
-    // 每一幀只寫一次 transform
-    let _pendingX = null, _rafId = 0, _curX = 0, _snapTimer = null;
-    const flushMove = () => {
-      _rafId = 0;
-      if (_pendingX === null) return;
-      const w = getWrap();
-      if (w) w.style.transform = `translateX(${_pendingX}%)`;
-      _curX = _pendingX;
-      _pendingX = null;
-    };
-    // 放手後的收尾動畫：用「手指放開當下的速度」接續，而不是從靜止重新起跑
-    // （錄影顯示：放手前每幀 ~2.4 的位移 → 放手後瞬間掉到 ~0 再慢慢加速，這個速度斷層就是「不絲滑」的來源）
-    const SNAP_EASE = 'cubic-bezier(.33,1,.68,1)';   // 起步斜率 = 1/.33 ≈ 3（ease-out，沒有 ease-in 的起步遲滯）
-    const snapTo = (targetIdx) => {
-      const w = getWrap();
-      if (!w) return;
-      const targetPct = -targetIdx * 33.333;
-      const remainPx = Math.abs(targetPct - _curX) / 33.333 * screenW0;
-      const toward = Math.sign(targetPct - _curX) || 1;
-      const v = vx * toward;                              // px/ms，朝目標方向的手指速度
-      let dur = 280;
-      if (v > 0.05 && remainPx > 1) dur = Math.max(160, Math.min(320, 3 * remainPx / v));
-      w.style.transition = `transform ${Math.round(dur)}ms ${SNAP_EASE}`;
-      clearTimeout(_snapTimer);
-      _snapTimer = setTimeout(() => { w.style.transition = ''; }, dur + 60);
-    };
-    const cancelMove = () => { if (_rafId) cancelAnimationFrame(_rafId); _rafId = 0; _pendingX = null; };
 
     // 目前 tab 對應的 translateX 基準值
     const baseX = () => -tabOrder.indexOf(ctab) * 33.333;
@@ -4867,10 +4841,8 @@
     // 不管手勢怎麼中斷（多指、被系統搶走、App 切到背景…），一律回到「目前分頁」的正確位置，避免卡在半途
     const resetSwipe = () => {
       tracking = false; dirLocked = false; isHoriz = false; touchId = null;
-      cancelMove();
       const w = getWrap();
       if (w) {
-        w.style.transition = '';
         w.classList.remove('notransition');
         w.style.transform = `translateX(${baseX()}%)`;
       }
@@ -4907,13 +4879,10 @@
       // 只處理內容區與空白處；標題列、記帳區、彈窗、輸入框、子分類面板都不算
       if (e.target.closest('#topBar, #kb, .sub-pop, [id$="Overlay"], input, textarea, select')) return;
       clearTimeout(_guardTimer);
-      clearTimeout(_snapTimer); { const _w = getWrap(); if (_w) _w.style.transition = ''; }
       const t = e.touches[0];
       touchId = t.identifier;
       sx = t.clientX;
       sy = t.clientY;
-      screenW0 = area.offsetWidth || window.innerWidth;
-      lastX = sx; lastT = e.timeStamp; vx = 0;
       tracking = true;
       dirLocked = false;
       isHoriz   = false;
@@ -4946,12 +4915,10 @@
       const atRight = idx === tabOrder.length - 1 && dx < 0;
       const move    = (atLeft || atRight) ? dx * 0.25 : dx;
 
-      const dtm = e.timeStamp - lastT;
-      if (dtm > 0) vx = 0.7 * vx + 0.3 * ((t.clientX - lastX) / dtm);
-      lastX = t.clientX; lastT = e.timeStamp;
-      const movePct = (move / screenW0) * 33.333;   // 不在每次 touchmove 讀 offsetWidth（會強制同步排版）
-      _pendingX = baseX() + movePct;
-      if (!_rafId) _rafId = requestAnimationFrame(flushMove);
+      const screenW = area.offsetWidth || window.innerWidth;
+      const movePct = (move / screenW) * 33.333;
+      const w = getWrap();
+      if (w) w.style.transform = `translateX(${baseX() + movePct}%)`;
     }, { passive: true });
 
     const endSwipe = e => {
@@ -4959,7 +4926,6 @@
       const t = findTouch(e.changedTouches);
       if (!t) return;            // 不是我們追蹤的那根手指放開
       tracking = false;
-      flushMove();   // 把最後一幀的位置寫進去，放手後的動畫才會從手指當下的位置接續，不會跳一格
 
       const w = getWrap();
       if (!isHoriz) {
@@ -4972,20 +4938,14 @@
       if (w) w.classList.remove('notransition');
 
       const dx = t.clientX - sx;
-      const threshold = screenW0 * 0.2;
+      const screenW = area.offsetWidth || window.innerWidth;
+      const threshold = screenW * 0.2;
       const idx = tabOrder.indexOf(ctab);
-      // 甩一下（速度夠快、位移不用到 20%）也算翻頁
-      const flick = Math.abs(vx) > 0.45 && Math.abs(dx) > 30;
-      const goNext = dx < -threshold || (flick && vx < 0 && dx < 0);
-      const goPrev = dx > threshold  || (flick && vx > 0 && dx > 0);
-
-      const tIdx = (goNext && idx < tabOrder.length - 1) ? idx + 1 : (goPrev && idx > 0) ? idx - 1 : idx;
-      snapTo(tIdx);
 
       try {
-        if (goNext && idx < tabOrder.length - 1) {
+        if (dx < -threshold && idx < tabOrder.length - 1) {
           goTab(tabOrder[idx + 1]);
-        } else if (goPrev && idx > 0) {
+        } else if (dx > threshold && idx > 0) {
           goTab(tabOrder[idx - 1]);
         } else {
           // 未達門檻，用動畫彈回原位
